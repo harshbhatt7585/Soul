@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from soul.agent.orchestrator import SoulOrchestrator
+from soul.agent.runner import SoulRunner
 
 
-def run_repl(orchestrator: SoulOrchestrator, *, mode: str = "manual", model: str | None = None) -> int:
+def run_repl(runner: SoulRunner, *, mode: str = "manual", model: str | None = None) -> int:
     print("Soul REPL")
     print("Type 'exit' or 'quit' to stop.")
 
@@ -23,7 +23,7 @@ def run_repl(orchestrator: SoulOrchestrator, *, mode: str = "manual", model: str
             break
 
         try:
-            result = orchestrator.run(prompt, mode=mode, model=model)
+            result = runner.run(prompt, mode=mode, model=model)
         except Exception as exc:  # pylint: disable=broad-except
             print(f"Error: {exc}")
             continue

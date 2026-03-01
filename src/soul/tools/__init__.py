@@ -1,11 +1,16 @@
-from soul.agent.tools import build_default_tools
+from soul.tools.memory_read import MemoryReadTool
+from soul.tools.memory_write import MemoryWriteTool
 from soul.tools.registry import ToolRegistry
+from soul.tools.web_fetch import WebFetchTool
+from soul.tools.web_search import WebSearchTool
 
 
 def create_default_registry() -> ToolRegistry:
     registry = ToolRegistry()
-    for tool in build_default_tools():
-        registry.register(tool)
+    registry.register(MemoryReadTool())
+    registry.register(MemoryWriteTool())
+    registry.register(WebSearchTool())
+    registry.register(WebFetchTool())
     return registry
 
 

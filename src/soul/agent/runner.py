@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import json
 
-from soul.agent.executor import Executor
-from soul.agent.planner import Planner
+from soul.agent.prompts import load_identity
 from soul.agent.responder import Responder
 from soul.agent.scratchpad import ScratchpadStore
-from soul.agent.types import AgentEvent, RunResult
+from soul.agent.planner import Planner
+from soul.agent.types import AgentEvent, RunResult, ToolTrace
 from soul.agent.validator import Validator
 from soul.config import Settings
 from soul.model.llm import OllamaClient
-from soul.storage.memory import MemoryStore
+from soul.storage.memory import MemoryEntry, MemoryStore
 from soul.tools import create_default_registry
 from soul.tools.base import ToolContext
 from soul.utils.text import truncate
@@ -26,19 +26,19 @@ DEFAULT_IDENTITY = {
 }
 
 
-class SoulOrchestrator:
+class SoulRunner:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._memory = MemoryStore(settings)
         self._scratchpad = ScratchpadStore(settings)
         self._registry = create_default_registry()
+        self._llm_client = OllamaClient(settings)
         self._planner = Planner()
         self._validator = Validator()
-        self._responder = Responder(settings, OllamaClient(settings))
-        self._executor = Executor(
-            registry=self._registry,
-            context=ToolContext(settings=settings, memory=self._memory, scratchpad=self._scratchpad),
-            memory_store=self._memory,
+        self._responder = Responder(settings, self._llm_client)
+        self._tool_context = ToolContext(
+            settings=settings,
+            memory=self._memory,
             scratchpad=self._scratchpad,
         )
 
@@ -62,10 +62,9 @@ class SoulOrchestrator:
 
     def doctor(self) -> dict[str, object]:
         self.initialize_state()
-        llm_client = OllamaClient(self._settings)
         warnings: list[str] = []
         try:
-            installed_models = llm_client.list_models()
+            installed_models = self._llm_client.list_models()
             ollama_available = True
         except RuntimeError as exc:
             warnings.append(str(exc))
@@ -98,6 +97,74 @@ class SoulOrchestrator:
             "warnings": warnings,
         }
 
+    def _execute_tool_calls(self, prompt: str, tool_calls: list[object]) -> tuple[list[ToolTrace], list[AgentEvent], list[MemoryEntry]]:
+        del prompt
+        traces: list[ToolTrace] = []
+        events: list[AgentEvent] = []
+        memories: list[MemoryEntry] = []
+
+        for tool_call in tool_calls:
+            name = getattr(tool_call, "name", "")
+            input_data = getattr(tool_call, "input", {})
+            try:
+                result = self._registry.run(name, self._tool_context, input_data)
+            except Exception as exc:  # pylint: disable=broad-except
+                event = AgentEvent(kind="tool", title=f"{name} failed", detail=str(exc))
+                events.append(event)
+                self._scratchpad.append(event)
+                continue
+
+            trace = ToolTrace(name=name, summary=result.summary, output=result.output)
+            traces.append(trace)
+            event = AgentEvent(kind="tool", title=name, detail=result.summary)
+            events.append(event)
+            self._scratchpad.append(event)
+
+            if name == "memory_recall" and isinstance(result.output, list):
+                memories = [
+                    MemoryEntry(
+                        id=str(item.get("id", "")),
+                        kind=str(item.get("kind", "note")),
+                        content=str(item.get("content", "")),
+                        tags=[str(tag) for tag in item.get("tags", [])],
+                        created_at=str(item.get("created_at", "")),
+                    )
+                    for item in result.output
+                    if isinstance(item, dict)
+                ]
+                memory_event = AgentEvent(
+                    kind="memory",
+                    title="Memory recall",
+                    detail=f"Loaded {len(memories)} memory item(s).",
+                )
+                events.append(memory_event)
+                self._scratchpad.append(memory_event)
+
+            if name == "web_search" and isinstance(result.output, dict):
+                hits = result.output.get("hits", [])
+                if isinstance(hits, list):
+                    for hit in hits[:2]:
+                        if not isinstance(hit, dict):
+                            continue
+                        url = str(hit.get("url", "")).strip()
+                        if not url:
+                            continue
+                        try:
+                            fetched = self._registry.run("web_fetch", self._tool_context, {"url": url})
+                        except Exception as exc:  # pylint: disable=broad-except
+                            fetch_event = AgentEvent(kind="tool", title="web_fetch failed", detail=str(exc))
+                            events.append(fetch_event)
+                            self._scratchpad.append(fetch_event)
+                            continue
+
+                        fetch_trace = ToolTrace(name="web_fetch", summary=fetched.summary, output=fetched.output)
+                        traces.append(fetch_trace)
+                        fetch_event = AgentEvent(kind="tool", title="web_fetch", detail=fetched.summary)
+                        events.append(fetch_event)
+                        self._scratchpad.append(fetch_event)
+
+        return traces, events, memories
+
     def run(self, prompt: str, *, mode: str = "manual", model: str | None = None) -> RunResult:
         normalized = prompt.strip()
         if not normalized:
@@ -112,7 +179,7 @@ class SoulOrchestrator:
         )
         self._scratchpad.append(planning_event)
 
-        traces, executor_events, memories = self._executor.execute(plan)
+        traces, tool_events, memories = self._execute_tool_calls(normalized, plan.tool_calls)
         validation = self._validator.validate(plan=plan, traces=traces)
         validation_event = AgentEvent(
             kind="validation",
@@ -132,8 +199,14 @@ class SoulOrchestrator:
         result_event = AgentEvent(kind="result", title="Reply", detail=truncate(reply, 200))
         self._scratchpad.append(result_event)
 
+        identity = load_identity(self._settings)
+        agent_name = str(identity.get("name", "Soul")).strip() or "Soul"
         self._memory.add(kind="user_request", content=normalized, tags=[mode])
-        self._memory.add(kind="assistant_reply", content=truncate(reply, 1_000), tags=[mode])
+        self._memory.add(
+            kind="assistant_reply",
+            content=truncate(f"{agent_name}: {reply}", 1_000),
+            tags=[mode],
+        )
 
         return RunResult(
             prompt=normalized,
@@ -144,5 +217,5 @@ class SoulOrchestrator:
             validation=validation,
             memories=memories,
             tools=traces,
-            events=[planning_event, *executor_events, validation_event, result_event],
+            events=[planning_event, *tool_events, validation_event, result_event],
         )

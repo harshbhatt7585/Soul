@@ -6,7 +6,7 @@ Dexter is TypeScript-based, but this repo deliberately translates its architectu
 
 - `src/soul/index.py`: entrypoint and command routing
 - `src/soul/cli.py`: interactive terminal loop
-- `src/soul/agent/`: planner, executor, validator, responder, scratchpad, and run types
+- `src/soul/agent/`: planner, runner, validator, responder, scratchpad, and run types
 - `src/soul/model/`: model provider abstraction
 - `src/soul/tools/`: tool registry plus web and memory tools
 - `src/soul/storage/`: local memory store
@@ -68,10 +68,9 @@ soul repl --mode manual
 ```text
 src/soul/
   agent/
-    executor.py
-    orchestrator.py
     planner.py
     prompts.py
+    runner.py
     responder.py
     scratchpad.py
     types.py
@@ -99,16 +98,16 @@ SOUL.md
 
 1. `src/soul/index.py` parses the CLI command.
 2. `init` creates `.soul/identity.json`, `.soul/memory.jsonl`, and `.soul/scratchpad.jsonl`.
-3. `run --prompt` creates the orchestrator and executes one agent turn.
-4. The orchestrator runs four stages inspired by Dexter's multi-agent design:
+3. `run --prompt` creates the runner and executes one agent turn.
+4. The runner executes the turn lifecycle:
    - planner: breaks the request into tool steps
-   - executor: runs memory and web tools
+   - runner: executes memory and web tools inline
    - validator: decides whether the gathered context is sufficient
    - responder: builds the final prompt and asks Ollama for the reply
 5. `SOUL.md` acts like the agent profile and behavior contract.
 6. Relevant memories, tool traces, and scratchpad events are merged into the responder prompt.
 7. The final user request and assistant reply are written back into local memory so future turns can reuse them.
-8. `repl` wraps the same orchestrator in a local interactive shell.
+8. `repl` wraps the same runner in a local interactive shell.
 
 ## Architecture note
 
