@@ -72,3 +72,16 @@ def build_user_prompt(prompt: str, traces: list[ToolTrace]) -> str:
         else "No tools were used for this turn."
     )
     return f"User request: {prompt}\n\n{trace_block}"
+
+
+# TODO
+def build_planning_prompt(prompt: str):
+    return (
+        ""
+    )
+
+# TODO
+def tool_identification_prompt(prompt: str):
+    return (
+        ""
+    )
