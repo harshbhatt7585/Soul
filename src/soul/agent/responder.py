@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from soul.agent.prompts import build_system_prompt, build_user_prompt
+from soul.agent.prompts import build_system_prompt, build_user_prompt, load_identity
 from soul.agent.types import ToolTrace, ValidationResult
 from soul.config import Settings, model_for_mode
 from soul.model.llm import OllamaClient
@@ -24,9 +24,12 @@ class Responder:
         model_override: str | None = None,
     ) -> tuple[str, str]:
         selected_model = model_for_mode(self._settings, mode, model_override)
+        identity = load_identity(self._settings)
+        agent_name = str(identity.get("name", "Soul")).strip() or "Soul"
         system_prompt = build_system_prompt(
             self._settings,
             mode=mode,
+            name=agent_name,
             memories=memories,
             traces=traces,
             validation_reasons=validation.reasons,
