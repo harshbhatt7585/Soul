@@ -11,8 +11,7 @@ class Planner:
         normalized = re.sub(r"\s+", " ", prompt).strip()
         steps = [
             "Recall relevant memory for the request.",
-            "Decide whether external research is needed.",
-            "Synthesize a grounded reply for the user.",
+            "Decide any tool needed for answring the request",
         ]
         tool_calls = [ToolCall(name="memory_recall", input={"query": normalized, "limit": 6})]
 
