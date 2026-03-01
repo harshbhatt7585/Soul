@@ -1,3 +1,3 @@
-from soul.cli import main
+from soul.index import main
 
 __all__ = ["main"]

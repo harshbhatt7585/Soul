@@ -1,17 +1,28 @@
 from __future__ import annotations
 
-from typing import Protocol
+from dataclasses import dataclass
+from typing import Any, Protocol
 
-from soul.models import FetchedDocument, SearchResult, SourceNote, SynthesisResult
-
-
-class SearchTool(Protocol):
-    def search(self, query: str, *, limit: int = 5) -> list[SearchResult]: ...
-
-
-class FetchTool(Protocol):
-    def fetch(self, url: str) -> FetchedDocument: ...
+from soul.agent.scratchpad import ScratchpadStore
+from soul.config import Settings
+from soul.storage.memory import MemoryStore
 
 
-class Synthesizer(Protocol):
-    def summarize(self, prompt: str, sources: list[SourceNote]) -> SynthesisResult: ...
+@dataclass(slots=True)
+class ToolContext:
+    settings: Settings
+    memory: MemoryStore
+    scratchpad: ScratchpadStore
+
+
+@dataclass(slots=True)
+class ToolResult:
+    summary: str
+    output: Any
+
+
+class Tool(Protocol):
+    name: str
+    description: str
+
+    def run(self, context: ToolContext, input_data: dict[str, Any]) -> ToolResult: ...

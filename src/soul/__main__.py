@@ -1,4 +1,4 @@
-from soul.cli import main
+from soul.index import main
 
 
 if __name__ == "__main__":

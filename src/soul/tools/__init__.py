@@ -1,14 +1,18 @@
-from soul.tools.fetch import WebFetchTool
-from soul.tools.search import build_search_tool
-from soul.tools.scrape import extract_excerpt, extract_text_from_html
-from soul.tools.base import FetchTool, SearchTool, Synthesizer
+from soul.tools.memory_read import MemoryReadTool
+from soul.tools.memory_write import MemoryWriteTool
+from soul.tools.registry import ToolRegistry
+from soul.tools.web_fetch import WebFetchTool
+from soul.tools.web_search import WebSearchTool
 
-__all__ = [
-    "FetchTool",
-    "SearchTool",
-    "Synthesizer",
-    "WebFetchTool",
-    "build_search_tool",
-    "extract_excerpt",
-    "extract_text_from_html",
-]
+
+def create_default_registry() -> ToolRegistry:
+    return (
+        ToolRegistry()
+        .register(MemoryReadTool())
+        .register(MemoryWriteTool())
+        .register(WebSearchTool())
+        .register(WebFetchTool())
+    )
+
+
+__all__ = ["create_default_registry", "ToolRegistry"]
