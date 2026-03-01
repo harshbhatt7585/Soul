@@ -4,7 +4,7 @@ import re
 
 from soul.agent.types import Plan, ToolCall
 from soul.utils.text import looks_like_research_request
-from souls.utils.touls import get_tools
+from souls.utils.tools import get_tools
 
 
 class Planner:
