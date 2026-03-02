@@ -60,11 +60,10 @@ class WebFetchAgentTool(Tools):
     def __init__(self) -> None:
         # TODO: Allow selection of excerpt length or content focus (e.g., summary, main body).
         super().__init__("web_fetch")
-        self._tool = WebFetchTool()
 
-    def __call__(self, context: ToolContext, input_data: dict[str, Any]) -> ToolResult:
+    def __call__(self) -> None:
         # TODO: Catch and handle network or parsing errors.
-        return self._tool.run(context, input_data)
+        pass
 
 
 def build_default_tools() -> list[Tools]:
