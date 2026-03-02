@@ -41,12 +41,6 @@ class SoulAgent:
         result = self._execute_action(result)
         result = self._respond(result)
 
-        selected_model, reply = self._respond(
-            prompt=normalized,
-            mode=mode,
-            traces=traces,
-            model=model,
-        )
         result_event = AgentEvent(kind="result", title="Reply", detail=truncate(reply, 200))
         self._scratchpad.append(result_event)
 
