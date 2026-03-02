@@ -9,7 +9,7 @@ from soul.agent.planner import Planner
 from soul.agent.types import AgentEvent, RunResult, ToolTrace
 from soul.agent.validator import Validator
 from soul.config import Settings
-from soul.model.llm import OllamaClient
+from soul.models.llm import LLMHandler
 from soul.storage.memory import MemoryEntry, MemoryStore
 from soul.tools import create_default_registry
 from soul.tools.base import ToolContext
@@ -32,7 +32,7 @@ class SoulRunner:
         self._memory = MemoryStore(settings)
         self._scratchpad = ScratchpadStore(settings)
         self._registry = create_default_registry()
-        self._llm_client = OllamaClient(settings)
+        self._llm_client = LLMHandler(settings)
         self._planner = Planner()
         self._validator = Validator()
         self._responder = Responder(settings, self._llm_client)

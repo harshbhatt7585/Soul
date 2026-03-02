@@ -7,7 +7,7 @@ Dexter is TypeScript-based, but this repo deliberately translates its architectu
 - `src/soul/index.py`: entrypoint and command routing
 - `src/soul/cli.py`: interactive terminal loop
 - `src/soul/agent/`: planner, runner, validator, responder, scratchpad, and run types
-- `src/soul/model/`: model provider abstraction
+- `src/soul/models/`: model provider abstraction
 - `src/soul/tools/`: tool registry plus web and memory tools
 - `src/soul/storage/`: local memory store
 
@@ -75,7 +75,7 @@ src/soul/
     scratchpad.py
     types.py
     validator.py
-  model/
+  models/
     llm.py
   storage/
     memory.py

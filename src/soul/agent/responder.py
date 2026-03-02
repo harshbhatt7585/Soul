@@ -3,13 +3,13 @@ from __future__ import annotations
 from soul.agent.prompts import build_system_prompt, build_user_prompt, load_identity
 from soul.agent.types import ToolTrace, ValidationResult
 from soul.config import Settings, model_for_mode
-from soul.model.llm import OllamaClient
+from soul.models.llm import LLMHandler
 from soul.storage.memory import MemoryEntry
 from soul.utils.text import truncate
 
 
 class Responder:
-    def __init__(self, settings: Settings, llm_client: OllamaClient) -> None:
+    def __init__(self, settings: Settings, llm_client: LLMHandler) -> None:
         self._settings = settings
         self._llm_client = llm_client
 

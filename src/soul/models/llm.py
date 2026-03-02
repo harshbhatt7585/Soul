@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 from soul.config import Settings
 
 
-class OllamaClient:
+class LLMHandler:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
@@ -63,3 +63,6 @@ class OllamaClient:
         if not content:
             raise RuntimeError("Ollama returned an empty response")
         return str(parsed.get("model", model)).strip() or model, content
+
+
+OllamaClient = LLMHandler
