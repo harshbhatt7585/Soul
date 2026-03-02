@@ -6,7 +6,7 @@ Dexter is TypeScript-based, but this repo deliberately translates its architectu
 
 - `src/soul/index.py`: entrypoint and command routing
 - `src/soul/cli.py`: interactive terminal loop
-- `src/soul/agent/`: agent, prompts, validator, scratchpad, and run types
+- `src/soul/agent/`: agent, prompts, scratchpad, and run types
 - `src/soul/models/`: model provider abstraction
 - `src/soul/tools/`: tool registry plus web and memory tools
 - `src/soul/storage/`: local memory store
@@ -72,7 +72,6 @@ src/soul/
     prompts.py
     scratchpad.py
     types.py
-    validator.py
   models/
     llm.py
   storage/
@@ -100,7 +99,6 @@ SOUL.md
 4. The agent executes the turn lifecycle:
    - agent: reasons about which tools to call
    - agent: executes memory and web tools inline
-   - validator: decides whether the gathered context is sufficient
    - agent: builds the final prompt and calls Ollama directly
 5. `SOUL.md` acts like the agent profile and behavior contract.
 6. Relevant memories, tool traces, and scratchpad events are merged into the final model prompt.
@@ -109,7 +107,7 @@ SOUL.md
 
 ## Architecture note
 
-Dexter's README describes a four-part architecture: reasoning, action, validation, and answer synthesis. This repo keeps that same flow, but the implementation is plain Python with standard-library HTTP and file storage instead of Bun, Ink, and LangChain.
+Dexter's README describes a four-part architecture: reasoning, action, and answer synthesis around tool use. This repo keeps that flow, but the implementation is plain Python with standard-library HTTP and file storage instead of Bun, Ink, and LangChain.
 
 ## What to customize next
 

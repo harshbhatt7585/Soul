@@ -46,17 +46,8 @@ class ToolTrace:
 
 
 @dataclass(slots=True)
-class ValidationResult:
-    ready: bool
-    reasons: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(slots=True)
 class AgentEvent:
-    kind: Literal["planning", "tool", "memory", "validation", "result"]
+    kind: Literal["planning", "tool", "memory", "result"]
     title: str
     detail: str
     created_at: str = field(default_factory=now_iso)
@@ -72,7 +63,6 @@ class RunResult:
     model: str
     reply: str
     plan: Plan
-    validation: ValidationResult
     memories: list[MemoryEntry]
     tools: list[ToolTrace]
     events: list[AgentEvent]
@@ -85,7 +75,6 @@ class RunResult:
             "model": self.model,
             "reply": self.reply,
             "plan": self.plan.to_dict(),
-            "validation": self.validation.to_dict(),
             "memories": [memory.to_dict() for memory in self.memories],
             "tools": [tool.to_dict() for tool in self.tools],
             "events": [event.to_dict() for event in self.events],

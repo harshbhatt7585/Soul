@@ -6,7 +6,6 @@ from soul.agent.tools import get_tools
 from soul.agent.prompts import build_system_prompt, build_user_prompt, load_identity
 from soul.agent.scratchpad import ScratchpadStore
 from soul.agent.types import AgentEvent, Plan, RunResult, ToolCall, ToolTrace
-from soul.agent.validator import Validator
 from soul.config import Settings, model_for_mode
 from soul.models.llm import LLMHandler
 from soul.storage.memory import MemoryEntry, MemoryStore
@@ -32,7 +31,6 @@ class SoulAgent:
         self._scratchpad = ScratchpadStore(settings)
         self._registry = create_default_registry()
         self._llm_handler = LLMHandler(settings)
-        self._validator = Validator()
         self._tool_context = ToolContext(
             settings=settings,
             memory=self._memory,
@@ -120,7 +118,6 @@ class SoulAgent:
         mode: str,
         memories: list[MemoryEntry],
         traces: list[ToolTrace],
-        validation_reasons: list[str],
         model: str | None = None,
     ) -> tuple[str, str]:
         selected_model = model_for_mode(self._settings, mode, model)
@@ -132,7 +129,6 @@ class SoulAgent:
             name=agent_name,
             memories=memories,
             traces=traces,
-            validation_reasons=validation_reasons,
         )
         user_prompt = build_user_prompt(prompt, traces)
 
@@ -149,9 +145,6 @@ class SoulAgent:
                 "",
                 f"Mode: {mode}",
                 f"Request: {prompt}",
-                "",
-                "Validation:",
-                *[f"- {reason}" for reason in validation_reasons],
                 "",
                 "Tool context:",
                 *tool_lines,
@@ -242,20 +235,12 @@ class SoulAgent:
         self._scratchpad.append(planning_event)
 
         traces, tool_events, memories = self._execute_tool_calls(plan.tool_calls)
-        validation = self._validator.validate(plan=plan, traces=traces)
-        validation_event = AgentEvent(
-            kind="validation",
-            title="Validation",
-            detail="; ".join(validation.reasons) or "No validation notes.",
-        )
-        self._scratchpad.append(validation_event)
 
         selected_model, reply = self._respond(
             prompt=normalized,
             mode=mode,
             memories=memories,
             traces=traces,
-            validation_reasons=validation.reasons,
             model=model,
         )
         result_event = AgentEvent(kind="result", title="Reply", detail=truncate(reply, 200))
@@ -276,8 +261,7 @@ class SoulAgent:
             model=selected_model,
             reply=reply,
             plan=plan,
-            validation=validation,
             memories=memories,
             tools=traces,
-            events=[planning_event, *tool_events, validation_event, result_event],
+            events=[planning_event, *tool_events, result_event],
         )
