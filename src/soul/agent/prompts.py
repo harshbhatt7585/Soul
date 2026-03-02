@@ -85,3 +85,10 @@ def tool_identification_prompt(prompt: str):
     return (
         ""
     )
+
+
+# TODO
+def build_inital_prompt(prompt: str):
+    return (
+        ""
+    )
