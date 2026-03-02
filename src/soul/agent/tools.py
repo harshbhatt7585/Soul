@@ -23,48 +23,59 @@ class Tools(ABC):
     def __call__(self, context: ToolContext, input_data: dict[str, Any]) -> ToolResult:
         raise NotImplementedError
 
-
+# TODO: Consider adding more features or extending behavior for MemoryRecallAgentTool.
 class MemoryRecallAgentTool(Tools):
     description = "Recall relevant memory entries for the current prompt."
 
     def __init__(self) -> None:
+        # TODO: Accept configuration options for future memory providers.
         super().__init__("memory_recall")
         self._tool = MemoryReadTool()
 
     def __call__(self, context: ToolContext, input_data: dict[str, Any]) -> ToolResult:
+        # TODO: Consider filtering results or providing ranking based on relevance.
         return self._tool.run(context, input_data)
 
 
+# TODO: Consider logging or auditing memory write actions.
 class MemoryWriteAgentTool(Tools):
     description = "Write a note, preference, or outcome into local memory."
 
     def __init__(self) -> None:
+        # TODO: Check for duplicate memory entries before writing.
         super().__init__("memory_write")
         self._tool = MemoryWriteTool()
 
     def __call__(self, context: ToolContext, input_data: dict[str, Any]) -> ToolResult:
+        # TODO: Validate input_data format before writing to memory.
         return self._tool.run(context, input_data)
 
 
+# TODO: Expose search provider as a configurable parameter.
 class WebSearchAgentTool(Tools):
     description = "Search the web with DuckDuckGo HTML results."
 
     def __init__(self) -> None:
+        # TODO: Allow users to specify query parameters, like safe search.
         super().__init__("web_search")
         self._tool = WebSearchTool()
 
     def __call__(self, context: ToolContext, input_data: dict[str, Any]) -> ToolResult:
+        # TODO: Add caching for repeated queries.
         return self._tool.run(context, input_data)
 
 
+# TODO: Add support for fetching multiple pages in batch.
 class WebFetchAgentTool(Tools):
     description = "Fetch a web page and convert it into a readable excerpt."
 
     def __init__(self) -> None:
+        # TODO: Allow selection of excerpt length or content focus (e.g., summary, main body).
         super().__init__("web_fetch")
         self._tool = WebFetchTool()
 
     def __call__(self, context: ToolContext, input_data: dict[str, Any]) -> ToolResult:
+        # TODO: Catch and handle network or parsing errors.
         return self._tool.run(context, input_data)
 
 
