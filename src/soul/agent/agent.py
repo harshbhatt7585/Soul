@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import json
 
+from soul.agent.tools import get_tools
 from soul.agent.prompts import build_system_prompt, build_user_prompt, load_identity
 from soul.agent.scratchpad import ScratchpadStore
-from soul.agent.planner import Planner
-from soul.agent.types import AgentEvent, RunResult, ToolTrace
+from soul.agent.types import AgentEvent, Plan, RunResult, ToolCall, ToolTrace
 from soul.agent.validator import Validator
 from soul.config import Settings, model_for_mode
 from soul.models.llm import LLMHandler
 from soul.storage.memory import MemoryEntry, MemoryStore
 from soul.tools import create_default_registry
 from soul.tools.base import ToolContext
-from soul.utils.text import truncate
+from soul.utils.text import looks_like_research_request, normalize_whitespace, truncate
 
 DEFAULT_IDENTITY = {
     "name": "Soul",
@@ -32,13 +32,31 @@ class SoulAgent:
         self._scratchpad = ScratchpadStore(settings)
         self._registry = create_default_registry()
         self._llm_handler = LLMHandler(settings)
-        self._planner = Planner()
         self._validator = Validator()
         self._tool_context = ToolContext(
             settings=settings,
             memory=self._memory,
             scratchpad=self._scratchpad,
         )
+
+    def _build_plan(self, prompt: str, *, mode: str) -> Plan:
+        normalized = normalize_whitespace(prompt)
+        steps = [
+            "Recall relevant memory for the request.",
+            "Reason about which tool is needed next.",
+            f"Available tools: {', '.join(get_tools())}",
+            "Synthesize a grounded reply for the user.",
+        ]
+        tool_calls = [ToolCall(name="memory_recall", input={"query": normalized, "limit": 6})]
+
+        if looks_like_research_request(normalized):
+            steps.insert(2, "Use web search and page fetch tools to gather source material.")
+            tool_calls.append(ToolCall(name="web_search", input={"query": normalized}))
+
+        if mode == "autonomous":
+            steps.insert(0, "Interpret the request as a goal review and identify the next high-value action.")
+
+        return Plan(objective=normalized, steps=steps, tool_calls=tool_calls)
 
     def initialize_state(self, *, force_identity: bool = False) -> dict[str, object]:
         self._settings.soul_home.mkdir(parents=True, exist_ok=True)
@@ -215,10 +233,10 @@ class SoulAgent:
             raise ValueError("Prompt must not be empty.")
 
         self.initialize_state()
-        plan = self._planner.build_plan(normalized, mode=mode)
+        plan = self._build_plan(normalized, mode=mode)
         planning_event = AgentEvent(
             kind="planning",
-            title="Plan",
+            title="Reasoning",
             detail=" | ".join(plan.steps),
         )
         self._scratchpad.append(planning_event)

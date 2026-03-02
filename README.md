@@ -6,7 +6,7 @@ Dexter is TypeScript-based, but this repo deliberately translates its architectu
 
 - `src/soul/index.py`: entrypoint and command routing
 - `src/soul/cli.py`: interactive terminal loop
-- `src/soul/agent/`: agent, planner, validator, scratchpad, and run types
+- `src/soul/agent/`: agent, prompts, validator, scratchpad, and run types
 - `src/soul/models/`: model provider abstraction
 - `src/soul/tools/`: tool registry plus web and memory tools
 - `src/soul/storage/`: local memory store
@@ -69,7 +69,6 @@ soul repl --mode manual
 src/soul/
   agent/
     agent.py
-    planner.py
     prompts.py
     scratchpad.py
     types.py
@@ -99,7 +98,7 @@ SOUL.md
 2. `init` creates `.soul/identity.json`, `.soul/memory.jsonl`, and `.soul/scratchpad.jsonl`.
 3. `run --prompt` creates the agent and executes one turn.
 4. The agent executes the turn lifecycle:
-   - planner: breaks the request into tool steps
+   - agent: reasons about which tools to call
    - agent: executes memory and web tools inline
    - validator: decides whether the gathered context is sufficient
    - agent: builds the final prompt and calls Ollama directly
@@ -110,11 +109,11 @@ SOUL.md
 
 ## Architecture note
 
-Dexter's README describes a four-part architecture: planning, action, validation, and answer synthesis. This repo keeps that same separation, but the implementation is plain Python with standard-library HTTP and file storage instead of Bun, Ink, and LangChain.
+Dexter's README describes a four-part architecture: reasoning, action, validation, and answer synthesis. This repo keeps that same flow, but the implementation is plain Python with standard-library HTTP and file storage instead of Bun, Ink, and LangChain.
 
 ## What to customize next
 
-1. Replace the heuristic planner with structured tool calling.
+1. Replace the heuristic tool-reasoning step with structured tool calling.
 2. Add background scheduling for autonomous runs.
 3. Add richer tools like email, messaging, or browser automation.
 4. Replace keyword memory search with embeddings.
