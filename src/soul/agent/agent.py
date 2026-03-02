@@ -7,15 +7,6 @@ from soul.agent.types import AgentEvent, RunResult
 from soul.config import AgentConfig
 from soul.models.llm import LLMHandler
 
-DEFAULT_IDENTITY = {
-    "name": "Soul",
-    "role": "A personal open-source CLI assistant that runs locally first.",
-    "principles": [
-        "Prefer concrete next actions over abstract advice.",
-        "Do not claim actions happened unless a tool or model output supports it.",
-        "Use available tools when they improve the answer.",
-    ],
-}
 
 # TODO: implement SoulAgent.
 class SoulAgent:
