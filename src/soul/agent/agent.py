@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import json
 
-from soul.agent.tools import get_tools
 from soul.agent.prompts import build_system_prompt, build_user_prompt, load_identity
 from soul.agent.scratchpad import ScratchpadStore
 from soul.agent.types import AgentEvent, Plan, RunResult, ToolCall, ToolTrace
 from soul.config import Settings, model_for_mode
 from soul.models.llm import LLMHandler
-from soul.storage.memory import MemoryEntry, MemoryStore
 from soul.tools import create_default_registry
 from soul.tools.base import ToolContext
 from soul.utils.text import looks_like_research_request, normalize_whitespace, truncate
@@ -19,7 +17,7 @@ DEFAULT_IDENTITY = {
     "principles": [
         "Prefer concrete next actions over abstract advice.",
         "Do not claim actions happened unless a tool or model output supports it.",
-        "Use memory when it helps, but do not overfit to stale context.",
+        "Use available tools when they improve the answer.",
     ],
 }
 
@@ -27,25 +25,25 @@ DEFAULT_IDENTITY = {
 class SoulAgent:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._memory = MemoryStore(settings)
         self._scratchpad = ScratchpadStore(settings)
         self._registry = create_default_registry()
         self._llm_handler = LLMHandler(settings)
         self._tool_context = ToolContext(
             settings=settings,
-            memory=self._memory,
             scratchpad=self._scratchpad,
         )
+
+    def _available_tools(self) -> list[str]:
+        return [f"{tool.name}: {tool.description}" for tool in self._registry.list()]
 
     def _build_plan(self, prompt: str, *, mode: str) -> Plan:
         normalized = normalize_whitespace(prompt)
         steps = [
-            "Recall relevant memory for the request.",
             "Reason about which tool is needed next.",
-            f"Available tools: {', '.join(get_tools())}",
+            f"Available tools: {', '.join(self._available_tools())}",
             "Synthesize a grounded reply for the user.",
         ]
-        tool_calls = [ToolCall(name="memory_recall", input={"query": normalized, "limit": 6})]
+        tool_calls: list[ToolCall] = []
 
         if looks_like_research_request(normalized):
             steps.insert(2, "Use web search and page fetch tools to gather source material.")
@@ -58,7 +56,6 @@ class SoulAgent:
 
     def initialize_state(self, *, force_identity: bool = False) -> dict[str, object]:
         self._settings.soul_home.mkdir(parents=True, exist_ok=True)
-        self._memory.ensure_ready()
         self._scratchpad.ensure_ready()
         if force_identity or not self._settings.identity_path.exists():
             self._settings.identity_path.write_text(json.dumps(DEFAULT_IDENTITY, indent=2) + "\n", encoding="utf-8")
@@ -68,7 +65,6 @@ class SoulAgent:
         return {
             "workspace_root": str(self._settings.workspace_root),
             "soul_home": str(self._settings.soul_home),
-            "memory_path": str(self._settings.memory_path),
             "scratchpad_path": str(self._settings.scratchpad_path),
             "identity_path": str(self._settings.identity_path),
             "identity_created": identity_created,
@@ -97,7 +93,6 @@ class SoulAgent:
         return {
             "workspace_root": str(self._settings.workspace_root),
             "soul_home": str(self._settings.soul_home),
-            "memory_path": str(self._settings.memory_path),
             "scratchpad_path": str(self._settings.scratchpad_path),
             "identity_path": str(self._settings.identity_path),
             "profile_path": str(self._settings.profile_path),
@@ -116,7 +111,6 @@ class SoulAgent:
         *,
         prompt: str,
         mode: str,
-        memories: list[MemoryEntry],
         traces: list[ToolTrace],
         model: str | None = None,
     ) -> tuple[str, str]:
@@ -127,7 +121,6 @@ class SoulAgent:
             self._settings,
             mode=mode,
             name=agent_name,
-            memories=memories,
             traces=traces,
         )
         user_prompt = build_user_prompt(prompt, traces)
@@ -153,10 +146,9 @@ class SoulAgent:
             ]
             return selected_model, truncate("\n".join(fallback), 4_000)
 
-    def _execute_tool_calls(self, tool_calls: list[object]) -> tuple[list[ToolTrace], list[AgentEvent], list[MemoryEntry]]:
+    def _execute_tool_calls(self, tool_calls: list[object]) -> tuple[list[ToolTrace], list[AgentEvent]]:
         traces: list[ToolTrace] = []
         events: list[AgentEvent] = []
-        memories: list[MemoryEntry] = []
 
         for tool_call in tool_calls:
             name = getattr(tool_call, "name", "")
@@ -174,26 +166,6 @@ class SoulAgent:
             event = AgentEvent(kind="tool", title=name, detail=result.summary)
             events.append(event)
             self._scratchpad.append(event)
-
-            if name == "memory_recall" and isinstance(result.output, list):
-                memories = [
-                    MemoryEntry(
-                        id=str(item.get("id", "")),
-                        kind=str(item.get("kind", "note")),
-                        content=str(item.get("content", "")),
-                        tags=[str(tag) for tag in item.get("tags", [])],
-                        created_at=str(item.get("created_at", "")),
-                    )
-                    for item in result.output
-                    if isinstance(item, dict)
-                ]
-                memory_event = AgentEvent(
-                    kind="memory",
-                    title="Memory recall",
-                    detail=f"Loaded {len(memories)} memory item(s).",
-                )
-                events.append(memory_event)
-                self._scratchpad.append(memory_event)
 
             if name == "web_search" and isinstance(result.output, dict):
                 hits = result.output.get("hits", [])
@@ -218,7 +190,7 @@ class SoulAgent:
                         events.append(fetch_event)
                         self._scratchpad.append(fetch_event)
 
-        return traces, events, memories
+        return traces, events
 
     def run(self, prompt: str, *, mode: str = "manual", model: str | None = None) -> RunResult:
         normalized = prompt.strip()
@@ -234,26 +206,16 @@ class SoulAgent:
         )
         self._scratchpad.append(planning_event)
 
-        traces, tool_events, memories = self._execute_tool_calls(plan.tool_calls)
+        traces, tool_events = self._execute_tool_calls(plan.tool_calls)
 
         selected_model, reply = self._respond(
             prompt=normalized,
             mode=mode,
-            memories=memories,
             traces=traces,
             model=model,
         )
         result_event = AgentEvent(kind="result", title="Reply", detail=truncate(reply, 200))
         self._scratchpad.append(result_event)
-
-        identity = load_identity(self._settings)
-        agent_name = str(identity.get("name", "Soul")).strip() or "Soul"
-        self._memory.add(kind="user_request", content=normalized, tags=[mode])
-        self._memory.add(
-            kind="assistant_reply",
-            content=truncate(f"{agent_name}: {reply}", 1_000),
-            tags=[mode],
-        )
 
         return RunResult(
             prompt=normalized,
@@ -261,7 +223,6 @@ class SoulAgent:
             model=selected_model,
             reply=reply,
             plan=plan,
-            memories=memories,
             tools=traces,
             events=[planning_event, *tool_events, result_event],
         )

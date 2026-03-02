@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from soul.storage.memory import MemoryEntry
-
 AgentMode = Literal["manual", "autonomous"]
 
 
@@ -47,7 +45,7 @@ class ToolTrace:
 
 @dataclass(slots=True)
 class AgentEvent:
-    kind: Literal["planning", "tool", "memory", "result"]
+    kind: Literal["planning", "tool", "result"]
     title: str
     detail: str
     created_at: str = field(default_factory=now_iso)
@@ -63,7 +61,6 @@ class RunResult:
     model: str
     reply: str
     plan: Plan
-    memories: list[MemoryEntry]
     tools: list[ToolTrace]
     events: list[AgentEvent]
     created_at: str = field(default_factory=now_iso)
@@ -75,7 +72,6 @@ class RunResult:
             "model": self.model,
             "reply": self.reply,
             "plan": self.plan.to_dict(),
-            "memories": [memory.to_dict() for memory in self.memories],
             "tools": [tool.to_dict() for tool in self.tools],
             "events": [event.to_dict() for event in self.events],
             "created_at": self.created_at,

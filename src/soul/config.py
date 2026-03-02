@@ -33,7 +33,6 @@ def _env_int(name: str, default: int) -> int:
 class Settings:
     workspace_root: Path
     soul_home: Path
-    memory_path: Path
     scratchpad_path: Path
     identity_path: Path
     profile_path: Path
@@ -55,7 +54,6 @@ def load_settings(workspace_root: Path | None = None) -> Settings:
     return Settings(
         workspace_root=root,
         soul_home=soul_home,
-        memory_path=soul_home / "memory.jsonl",
         scratchpad_path=soul_home / "scratchpad.jsonl",
         identity_path=soul_home / "identity.json",
         profile_path=root / "SOUL.md",

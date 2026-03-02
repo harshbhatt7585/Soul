@@ -5,13 +5,11 @@ from typing import Any, Protocol
 
 from soul.agent.scratchpad import ScratchpadStore
 from soul.config import Settings
-from soul.storage.memory import MemoryStore
 
 
 @dataclass(slots=True)
 class ToolContext:
     settings: Settings
-    memory: MemoryStore
     scratchpad: ScratchpadStore
 
 

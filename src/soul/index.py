@@ -16,7 +16,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    init_parser = subparsers.add_parser("init", help="Create the local .soul state files.")
+    init_parser = subparsers.add_parser("init", help="Create the local identity and scratchpad files.")
     init_parser.add_argument("--force-identity", action="store_true", help="Overwrite .soul/identity.json.")
 
     doctor_parser = subparsers.add_parser("doctor", help="Inspect local paths and Ollama model availability.")

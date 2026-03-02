@@ -1,6 +1,6 @@
 # Soul
 
-Soul is a local-first Python CLI assistant scaffold inspired by the architecture of [Dexter](https://github.com/virattt/dexter), but adapted for personal agents, local memory, and small Ollama models.
+Soul is a local-first Python CLI assistant scaffold inspired by the architecture of [Dexter](https://github.com/virattt/dexter), but adapted for personal agents, local tooling, and small Ollama models.
 
 Dexter is TypeScript-based, but this repo deliberately translates its architecture into Python:
 
@@ -8,8 +8,7 @@ Dexter is TypeScript-based, but this repo deliberately translates its architectu
 - `src/soul/cli.py`: interactive terminal loop
 - `src/soul/agent/`: agent, prompts, scratchpad, and run types
 - `src/soul/models/`: model provider abstraction
-- `src/soul/tools/`: tool registry plus web and memory tools
-- `src/soul/storage/`: local memory store
+- `src/soul/tools/`: tool registry plus web tools
 
 The implementation here is original boilerplate, not a source copy. The goal is to preserve Dexter's layering and workflow in a Python-first local project.
 
@@ -18,12 +17,11 @@ The implementation here is original boilerplate, not a source copy. The goal is 
 Soul has two modes:
 
 1. `manual`: respond to the operator directly
-2. `autonomous`: inspect memory, goals, and scratchpad, then suggest or start the next step
+2. `autonomous`: inspect the goal and scratchpad, then suggest or start the next step
 
 This first scaffold is intentionally small:
 
 - local-first Ollama chat
-- append-only memory in `.soul/memory.jsonl`
 - append-only run scratchpad in `.soul/scratchpad.jsonl`
 - simple web search and fetch tools
 - an interactive REPL that can grow into a richer terminal agent
@@ -74,13 +72,9 @@ src/soul/
     types.py
   models/
     llm.py
-  storage/
-    memory.py
   tools/
     base.py
     registry.py
-    memory_read.py
-    memory_write.py
     web_fetch.py
     web_search.py
   utils/
@@ -94,15 +88,15 @@ SOUL.md
 ## How it works
 
 1. `src/soul/index.py` parses the CLI command.
-2. `init` creates `.soul/identity.json`, `.soul/memory.jsonl`, and `.soul/scratchpad.jsonl`.
+2. `init` creates `.soul/identity.json` and `.soul/scratchpad.jsonl`.
 3. `run --prompt` creates the agent and executes one turn.
 4. The agent executes the turn lifecycle:
    - agent: reasons about which tools to call
-   - agent: executes memory and web tools inline
+   - agent: executes web tools inline when needed
    - agent: builds the final prompt and calls Ollama directly
 5. `SOUL.md` acts like the agent profile and behavior contract.
-6. Relevant memories, tool traces, and scratchpad events are merged into the final model prompt.
-7. The final user request and assistant reply are written back into local memory so future turns can reuse them.
+6. Relevant tool traces and identity data are merged into the final model prompt.
+7. Scratchpad events are written locally for debugging and recent run context.
 8. `repl` wraps the same agent in a local interactive shell.
 
 ## Architecture note
@@ -114,4 +108,4 @@ Dexter's README describes a four-part architecture: reasoning, action, and answe
 1. Replace the heuristic tool-reasoning step with structured tool calling.
 2. Add background scheduling for autonomous runs.
 3. Add richer tools like email, messaging, or browser automation.
-4. Replace keyword memory search with embeddings.
+4. Add a pluggable context provider if you want external memory or retrieval.
