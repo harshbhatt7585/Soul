@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-
-from soul.agent.prompts import build_system_prompt, build_user_prompt, load_identity
 from soul.agent.scratchpad import ScratchpadStore
-from soul.agent.types import AgentEvent, Plan, RunResult, ToolCall, ToolTrace
-from soul.config import Settings, model_for_mode
+from soul.agent.types import AgentEvent, RunResult
+from soul.config import AgentConfig
 from soul.models.llm import LLMHandler
 
 DEFAULT_IDENTITY = {
@@ -21,10 +19,10 @@ DEFAULT_IDENTITY = {
 
 # TODO: implement SoulAgent.
 class SoulAgent:
-    def __init__(self, settings: Settings) -> None:
-        self._settings = settings
-        self._scratchpad = ScratchpadStore(settings)
-        self._llm_handler = LLMHandler(settings)
+    def __init__(self, config: AgentConfig) -> None:
+        self._config = config
+        self._scratchpad = ScratchpadStore(config)
+        self._llm_handler = LLMHandler(config)
 
 
     def _available_tools(self) -> list[str]:
@@ -32,18 +30,18 @@ class SoulAgent:
 
 
     def initialize_state(self, *, force_identity: bool = False) -> dict[str, object]:
-        self._settings.soul_home.mkdir(parents=True, exist_ok=True)
+        self._config.soul_home.mkdir(parents=True, exist_ok=True)
         self._scratchpad.ensure_ready()
-        if force_identity or not self._settings.identity_path.exists():
-            self._settings.identity_path.write_text(json.dumps(DEFAULT_IDENTITY, indent=2) + "\n", encoding="utf-8")
+        if force_identity or not self._config.identity_path.exists():
+            self._config.identity_path.write_text(json.dumps(DEFAULT_IDENTITY, indent=2) + "\n", encoding="utf-8")
             identity_created = True
         else:
             identity_created = False
         return {
-            "workspace_root": str(self._settings.workspace_root),
-            "soul_home": str(self._settings.soul_home),
-            "scratchpad_path": str(self._settings.scratchpad_path),
-            "identity_path": str(self._settings.identity_path),
+            "workspace_root": str(self._config.workspace_root),
+            "soul_home": str(self._config.soul_home),
+            "scratchpad_path": str(self._config.scratchpad_path),
+            "identity_path": str(self._config.identity_path),
             "identity_created": identity_created,
         }
 

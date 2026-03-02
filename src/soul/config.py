@@ -30,7 +30,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 @dataclass(slots=True)
-class Settings:
+class AgentConfig:
     workspace_root: Path
     soul_home: Path
     scratchpad_path: Path
@@ -47,11 +47,11 @@ class Settings:
     user_agent: str
 
 
-def load_settings(workspace_root: Path | None = None) -> Settings:
+def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
     root = Path(workspace_root or os.getcwd()).resolve()
     soul_home = root / ".soul"
 
-    return Settings(
+    return AgentConfig(
         workspace_root=root,
         soul_home=soul_home,
         scratchpad_path=soul_home / "scratchpad.jsonl",
@@ -69,9 +69,13 @@ def load_settings(workspace_root: Path | None = None) -> Settings:
     )
 
 
-def model_for_mode(settings: Settings, mode: str, override: str | None = None) -> str:
+def model_for_mode(config: AgentConfig, mode: str, override: str | None = None) -> str:
     if override:
         return override
     if mode == "autonomous":
-        return settings.autonomous_model
-    return settings.manual_model
+        return config.autonomous_model
+    return config.manual_model
+
+
+Settings = AgentConfig
+load_settings = load_agent_config

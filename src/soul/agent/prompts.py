@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from soul.agent.types import ToolTrace
-from soul.config import Settings
+from soul.config import AgentConfig
 
 DEFAULT_PROFILE = """# Soul
 
@@ -15,28 +15,28 @@ Soul is a local-first personal CLI assistant.
 """
 
 
-def load_profile(settings: Settings) -> str:
+def load_profile(config: AgentConfig) -> str:
     try:
-        return settings.profile_path.read_text(encoding="utf-8")
+        return config.profile_path.read_text(encoding="utf-8")
     except OSError:
         return DEFAULT_PROFILE
 
 
-def load_identity(settings: Settings) -> dict[str, object]:
+def load_identity(config: AgentConfig) -> dict[str, object]:
     try:
-        return json.loads(settings.identity_path.read_text(encoding="utf-8"))
+        return json.loads(config.identity_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
 
 
 def build_system_prompt(
-    settings: Settings,
+    config: AgentConfig,
     *,
     mode: str,
     name: str,
     traces: list[ToolTrace],
 ) -> str:
-    identity = load_identity(settings)
+    identity = load_identity(config)
     resolved_name = name.strip() or str(identity.get("name", "Soul")).strip() or "Soul"
     tool_block = "\n".join(f"- {trace.name}: {trace.summary}" for trace in traces) or "- none"
     mode_instruction = (
@@ -46,7 +46,7 @@ def build_system_prompt(
     )
 
     return (
-        f"{load_profile(settings)}\n\n"
+        f"{load_profile(config)}\n\n"
         f"## Identity\n{json.dumps(identity, indent=2)}\n\n"
         f"## Tool traces\n{tool_block}\n\n"
         f"You are a friendly personal assistant. Your name is {resolved_name}.\n"

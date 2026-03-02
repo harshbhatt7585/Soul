@@ -6,7 +6,7 @@ from typing import Sequence
 
 from soul.agent.agent import SoulAgent
 from soul.cli import run_repl
-from soul.config import load_settings
+from soul.config import load_agent_config
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -43,8 +43,8 @@ def _print_text_payload(payload: dict[str, object]) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    settings = load_settings()
-    agent = SoulAgent(settings)
+    config = load_agent_config()
+    agent = SoulAgent(config)
 
     if args.command == "init":
         print(json.dumps(agent.initialize_state(force_identity=args.force_identity), indent=2))

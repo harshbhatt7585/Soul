@@ -4,12 +4,12 @@ import json
 from pathlib import Path
 
 from soul.agent.types import AgentEvent
-from soul.config import Settings
+from soul.config import AgentConfig
 
 
 class ScratchpadStore:
-    def __init__(self, settings: Settings) -> None:
-        self._path = settings.scratchpad_path
+    def __init__(self, config: AgentConfig) -> None:
+        self._path = config.scratchpad_path
 
     def ensure_ready(self) -> Path:
         self._path.parent.mkdir(parents=True, exist_ok=True)
