@@ -21,20 +21,7 @@ class SoulAgent:
 
 
     def initialize_state(self, *, force_identity: bool = False) -> dict[str, object]:
-        self._config.soul_home.mkdir(parents=True, exist_ok=True)
         self._scratchpad.ensure_ready()
-        if force_identity or not self._config.identity_path.exists():
-            self._config.identity_path.write_text(json.dumps(DEFAULT_IDENTITY, indent=2) + "\n", encoding="utf-8")
-            identity_created = True
-        else:
-            identity_created = False
-        return {
-            "workspace_root": str(self._config.workspace_root),
-            "soul_home": str(self._config.soul_home),
-            "scratchpad_path": str(self._config.scratchpad_path),
-            "identity_path": str(self._config.identity_path),
-            "identity_created": identity_created,
-        }
 
 
     def run(self, prompt: str, *, mode: str = "manual", model: str | None = None) -> RunResult:
