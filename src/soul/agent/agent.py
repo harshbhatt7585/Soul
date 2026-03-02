@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 
 from soul.agent.prompts import build_system_prompt, build_user_prompt, load_identity
 from soul.agent.scratchpad import ScratchpadStore
 from soul.agent.types import AgentEvent, Plan, RunResult, ToolCall, ToolTrace
 from soul.config import Settings, model_for_mode
 from soul.models.llm import LLMHandler
-from soul.tools import create_default_registry
-from soul.tools.base import ToolContext
-from soul.utils.text import looks_like_research_request, normalize_whitespace, truncate
 
 DEFAULT_IDENTITY = {
     "name": "Soul",
@@ -21,38 +19,17 @@ DEFAULT_IDENTITY = {
     ],
 }
 
-
+# TODO: implement SoulAgent.
 class SoulAgent:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._scratchpad = ScratchpadStore(settings)
-        self._registry = create_default_registry()
         self._llm_handler = LLMHandler(settings)
-        self._tool_context = ToolContext(
-            settings=settings,
-            scratchpad=self._scratchpad,
-        )
+
 
     def _available_tools(self) -> list[str]:
         return [f"{tool.name}: {tool.description}" for tool in self._registry.list()]
 
-    def _build_plan(self, prompt: str, *, mode: str) -> Plan:
-        normalized = normalize_whitespace(prompt)
-        steps = [
-            "Reason about which tool is needed next.",
-            f"Available tools: {', '.join(self._available_tools())}",
-            "Synthesize a grounded reply for the user.",
-        ]
-        tool_calls: list[ToolCall] = []
-
-        if looks_like_research_request(normalized):
-            steps.insert(2, "Use web search and page fetch tools to gather source material.")
-            tool_calls.append(ToolCall(name="web_search", input={"query": normalized}))
-
-        if mode == "autonomous":
-            steps.insert(0, "Interpret the request as a goal review and identify the next high-value action.")
-
-        return Plan(objective=normalized, steps=steps, tool_calls=tool_calls)
 
     def initialize_state(self, *, force_identity: bool = False) -> dict[str, object]:
         self._settings.soul_home.mkdir(parents=True, exist_ok=True)
@@ -70,127 +47,6 @@ class SoulAgent:
             "identity_created": identity_created,
         }
 
-    def doctor(self) -> dict[str, object]:
-        self.initialize_state()
-        warnings: list[str] = []
-        try:
-            installed_models = self._llm_handler.list_models()
-            ollama_available = True
-        except RuntimeError as exc:
-            warnings.append(str(exc))
-            installed_models = []
-            ollama_available = False
-
-        required_models = list(
-            dict.fromkeys(
-                [
-                    self._settings.manual_model,
-                    self._settings.autonomous_model,
-                    self._settings.research_model,
-                ]
-            )
-        )
-        return {
-            "workspace_root": str(self._settings.workspace_root),
-            "soul_home": str(self._settings.soul_home),
-            "scratchpad_path": str(self._settings.scratchpad_path),
-            "identity_path": str(self._settings.identity_path),
-            "profile_path": str(self._settings.profile_path),
-            "ollama_base_url": self._settings.ollama_base_url,
-            "ollama_available": ollama_available,
-            "manual_model": self._settings.manual_model,
-            "autonomous_model": self._settings.autonomous_model,
-            "research_model": self._settings.research_model,
-            "installed_models": installed_models,
-            "missing_models": [model for model in required_models if model not in installed_models],
-            "warnings": warnings,
-        }
-
-    def _respond(
-        self,
-        *,
-        prompt: str,
-        mode: str,
-        traces: list[ToolTrace],
-        model: str | None = None,
-    ) -> tuple[str, str]:
-        selected_model = model_for_mode(self._settings, mode, model)
-        identity = load_identity(self._settings)
-        agent_name = str(identity.get("name", "Soul")).strip() or "Soul"
-        system_prompt = build_system_prompt(
-            self._settings,
-            mode=mode,
-            name=agent_name,
-            traces=traces,
-        )
-        user_prompt = build_user_prompt(prompt, traces)
-
-        try:
-            return self._llm_handler.chat(
-                model=selected_model,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-            )
-        except Exception as exc:  # pylint: disable=broad-except
-            tool_lines = [f"- {trace.name}: {trace.summary}" for trace in traces] or ["- none"]
-            fallback = [
-                f"Soul could not reach the local model layer: {exc}",
-                "",
-                f"Mode: {mode}",
-                f"Request: {prompt}",
-                "",
-                "Tool context:",
-                *tool_lines,
-                "",
-                "Next step: start Ollama, pull the configured models, and rerun the command.",
-            ]
-            return selected_model, truncate("\n".join(fallback), 4_000)
-
-    def _execute_tool_calls(self, tool_calls: list[object]) -> tuple[list[ToolTrace], list[AgentEvent]]:
-        traces: list[ToolTrace] = []
-        events: list[AgentEvent] = []
-
-        for tool_call in tool_calls:
-            name = getattr(tool_call, "name", "")
-            input_data = getattr(tool_call, "input", {})
-            try:
-                result = self._registry.run(name, self._tool_context, input_data)
-            except Exception as exc:  # pylint: disable=broad-except
-                event = AgentEvent(kind="tool", title=f"{name} failed", detail=str(exc))
-                events.append(event)
-                self._scratchpad.append(event)
-                continue
-
-            trace = ToolTrace(name=name, summary=result.summary, output=result.output)
-            traces.append(trace)
-            event = AgentEvent(kind="tool", title=name, detail=result.summary)
-            events.append(event)
-            self._scratchpad.append(event)
-
-            if name == "web_search" and isinstance(result.output, dict):
-                hits = result.output.get("hits", [])
-                if isinstance(hits, list):
-                    for hit in hits[:2]:
-                        if not isinstance(hit, dict):
-                            continue
-                        url = str(hit.get("url", "")).strip()
-                        if not url:
-                            continue
-                        try:
-                            fetched = self._registry.run("web_fetch", self._tool_context, {"url": url})
-                        except Exception as exc:  # pylint: disable=broad-except
-                            fetch_event = AgentEvent(kind="tool", title="web_fetch failed", detail=str(exc))
-                            events.append(fetch_event)
-                            self._scratchpad.append(fetch_event)
-                            continue
-
-                        fetch_trace = ToolTrace(name="web_fetch", summary=fetched.summary, output=fetched.output)
-                        traces.append(fetch_trace)
-                        fetch_event = AgentEvent(kind="tool", title="web_fetch", detail=fetched.summary)
-                        events.append(fetch_event)
-                        self._scratchpad.append(fetch_event)
-
-        return traces, events
 
     def run(self, prompt: str, *, mode: str = "manual", model: str | None = None) -> RunResult:
         normalized = prompt.strip()
@@ -198,7 +54,6 @@ class SoulAgent:
             raise ValueError("Prompt must not be empty.")
 
         self.initialize_state()
-        plan = self._build_plan(normalized, mode=mode)
         planning_event = AgentEvent(
             kind="planning",
             title="Reasoning",
@@ -206,7 +61,9 @@ class SoulAgent:
         )
         self._scratchpad.append(planning_event)
 
-        traces, tool_events = self._execute_tool_calls(plan.tool_calls)
+        result = self._exectue_plan(prompt)
+        result = self._execute_action(result)
+        result = self._respond(result)
 
         selected_model, reply = self._respond(
             prompt=normalized,
@@ -218,11 +75,6 @@ class SoulAgent:
         self._scratchpad.append(result_event)
 
         return RunResult(
-            prompt=normalized,
-            mode=mode,  # type: ignore[arg-type]
-            model=selected_model,
+            prompt=prompt,
             reply=reply,
-            plan=plan,
-            tools=traces,
-            events=[planning_event, *tool_events, result_event],
         )
