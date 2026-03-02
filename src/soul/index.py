@@ -4,7 +4,7 @@ import argparse
 import json
 from typing import Sequence
 
-from soul.agent.runner import SoulRunner
+from soul.agent.agent import SoulAgent
 from soul.cli import run_repl
 from soul.config import load_settings
 
@@ -44,14 +44,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     settings = load_settings()
-    runner = SoulRunner(settings)
+    agent = SoulAgent(settings)
 
     if args.command == "init":
-        print(json.dumps(runner.initialize_state(force_identity=args.force_identity), indent=2))
+        print(json.dumps(agent.initialize_state(force_identity=args.force_identity), indent=2))
         return 0
 
     if args.command == "doctor":
-        payload = runner.doctor()
+        payload = agent.doctor()
         if args.format == "json":
             print(json.dumps(payload, indent=2))
         else:
@@ -64,7 +64,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "run":
-        result = runner.run(args.prompt, mode=args.mode, model=args.model)
+        result = agent.run(args.prompt, mode=args.mode, model=args.model)
         if args.json:
             print(json.dumps(result.to_dict(), indent=2))
         else:
@@ -72,7 +72,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "repl":
-        return run_repl(runner, mode=args.mode, model=args.model)
+        return run_repl(agent, mode=args.mode, model=args.model)
 
     parser.error(f"Unknown command: {args.command}")
     return 2

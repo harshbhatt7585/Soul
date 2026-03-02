@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 
-from soul.agent.prompts import load_identity
-from soul.agent.responder import Responder
+from soul.agent.prompts import build_system_prompt, build_user_prompt, load_identity
 from soul.agent.scratchpad import ScratchpadStore
 from soul.agent.planner import Planner
 from soul.agent.types import AgentEvent, RunResult, ToolTrace
 from soul.agent.validator import Validator
-from soul.config import Settings
+from soul.config import Settings, model_for_mode
 from soul.models.llm import LLMHandler
 from soul.storage.memory import MemoryEntry, MemoryStore
 from soul.tools import create_default_registry
@@ -26,16 +25,15 @@ DEFAULT_IDENTITY = {
 }
 
 
-class SoulRunner:
+class SoulAgent:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._memory = MemoryStore(settings)
         self._scratchpad = ScratchpadStore(settings)
         self._registry = create_default_registry()
-        self._llm_client = LLMHandler(settings)
+        self._llm_handler = LLMHandler(settings)
         self._planner = Planner()
         self._validator = Validator()
-        self._responder = Responder(settings, self._llm_client)
         self._tool_context = ToolContext(
             settings=settings,
             memory=self._memory,
@@ -64,7 +62,7 @@ class SoulRunner:
         self.initialize_state()
         warnings: list[str] = []
         try:
-            installed_models = self._llm_client.list_models()
+            installed_models = self._llm_handler.list_models()
             ollama_available = True
         except RuntimeError as exc:
             warnings.append(str(exc))
@@ -97,8 +95,54 @@ class SoulRunner:
             "warnings": warnings,
         }
 
-    def _execute_tool_calls(self, prompt: str, tool_calls: list[object]) -> tuple[list[ToolTrace], list[AgentEvent], list[MemoryEntry]]:
-        del prompt
+    def _respond(
+        self,
+        *,
+        prompt: str,
+        mode: str,
+        memories: list[MemoryEntry],
+        traces: list[ToolTrace],
+        validation_reasons: list[str],
+        model: str | None = None,
+    ) -> tuple[str, str]:
+        selected_model = model_for_mode(self._settings, mode, model)
+        identity = load_identity(self._settings)
+        agent_name = str(identity.get("name", "Soul")).strip() or "Soul"
+        system_prompt = build_system_prompt(
+            self._settings,
+            mode=mode,
+            name=agent_name,
+            memories=memories,
+            traces=traces,
+            validation_reasons=validation_reasons,
+        )
+        user_prompt = build_user_prompt(prompt, traces)
+
+        try:
+            return self._llm_handler.chat(
+                model=selected_model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            tool_lines = [f"- {trace.name}: {trace.summary}" for trace in traces] or ["- none"]
+            fallback = [
+                f"Soul could not reach the local model layer: {exc}",
+                "",
+                f"Mode: {mode}",
+                f"Request: {prompt}",
+                "",
+                "Validation:",
+                *[f"- {reason}" for reason in validation_reasons],
+                "",
+                "Tool context:",
+                *tool_lines,
+                "",
+                "Next step: start Ollama, pull the configured models, and rerun the command.",
+            ]
+            return selected_model, truncate("\n".join(fallback), 4_000)
+
+    def _execute_tool_calls(self, tool_calls: list[object]) -> tuple[list[ToolTrace], list[AgentEvent], list[MemoryEntry]]:
         traces: list[ToolTrace] = []
         events: list[AgentEvent] = []
         memories: list[MemoryEntry] = []
@@ -179,7 +223,7 @@ class SoulRunner:
         )
         self._scratchpad.append(planning_event)
 
-        traces, tool_events, memories = self._execute_tool_calls(normalized, plan.tool_calls)
+        traces, tool_events, memories = self._execute_tool_calls(plan.tool_calls)
         validation = self._validator.validate(plan=plan, traces=traces)
         validation_event = AgentEvent(
             kind="validation",
@@ -188,13 +232,13 @@ class SoulRunner:
         )
         self._scratchpad.append(validation_event)
 
-        selected_model, reply = self._responder.respond(
+        selected_model, reply = self._respond(
             prompt=normalized,
             mode=mode,
             memories=memories,
             traces=traces,
-            validation=validation,
-            model_override=model,
+            validation_reasons=validation.reasons,
+            model=model,
         )
         result_event = AgentEvent(kind="result", title="Reply", detail=truncate(reply, 200))
         self._scratchpad.append(result_event)

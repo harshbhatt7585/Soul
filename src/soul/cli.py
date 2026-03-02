@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from soul.agent.runner import SoulRunner
+from soul.agent.agent import SoulAgent
 
 
-def run_repl(runner: SoulRunner, *, mode: str = "manual", model: str | None = None) -> int:
+def run_repl(agent: SoulAgent, *, mode: str = "manual", model: str | None = None) -> int:
     print("Soul REPL")
     print("Type 'exit' or 'quit' to stop.")
 
@@ -23,7 +23,7 @@ def run_repl(runner: SoulRunner, *, mode: str = "manual", model: str | None = No
             break
 
         try:
-            result = runner.run(prompt, mode=mode, model=model)
+            result = agent.run(prompt, mode=mode, model=model)
         except Exception as exc:  # pylint: disable=broad-except
             print(f"Error: {exc}")
             continue

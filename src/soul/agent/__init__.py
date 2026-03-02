@@ -1,3 +1,3 @@
-from soul.agent.runner import SoulRunner
+from soul.agent.agent import SoulAgent
 
-__all__ = ["SoulRunner"]
+__all__ = ["SoulAgent"]
