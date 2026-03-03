@@ -34,8 +34,7 @@ class AgentConfig:
     workspace_root: Path
     soul_home: Path
     scratchpad_path: Path
-    identity_path: Path
-    profile_path: Path
+    soul_path: Path
     ollama_base_url: str
     manual_model: str
     autonomous_model: str
@@ -55,8 +54,7 @@ def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
         workspace_root=root,
         soul_home=soul_home,
         scratchpad_path=soul_home / "scratchpad.jsonl",
-        identity_path=soul_home / "identity.json",
-        profile_path=root / "SOUL.md",
+        soul_path=root / "SOUL.md",
         ollama_base_url=os.environ.get("SOUL_OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
         manual_model=os.environ.get("SOUL_MANUAL_MODEL", DEFAULT_MANUAL_MODEL),
         autonomous_model=os.environ.get("SOUL_AUTONOMOUS_MODEL", DEFAULT_AUTONOMOUS_MODEL),

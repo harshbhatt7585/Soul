@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
-from soul.agent.types import ToolTrace
 from soul.config import AgentConfig
 
-DEFAULT_PROFILE = """# Soul
+DEFAULT_SOUL_PROMPT = """# Soul
 
 Soul is a local-first personal CLI assistant.
 
@@ -15,18 +15,11 @@ Soul is a local-first personal CLI assistant.
 """
 
 
-def load_profile(config: AgentConfig) -> str:
+def load_soul_prompt(config: AgentConfig) -> str:
     try:
-        return config.profile_path.read_text(encoding="utf-8")
+        return config.soul_path.read_text(encoding="utf-8")
     except OSError:
-        return DEFAULT_PROFILE
-
-
-def load_identity(config: AgentConfig) -> dict[str, object]:
-    try:
-        return json.loads(config.identity_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+        return DEFAULT_SOUL_PROMPT
 
 
 def build_system_prompt(
@@ -34,11 +27,19 @@ def build_system_prompt(
     *,
     mode: str,
     name: str,
-    traces: list[ToolTrace],
+    traces: list[dict[str, Any]] | list[object],
 ) -> str:
-    identity = load_identity(config)
-    resolved_name = name.strip() or str(identity.get("name", "Soul")).strip() or "Soul"
-    tool_block = "\n".join(f"- {trace.name}: {trace.summary}" for trace in traces) or "- none"
+    soul_prompt = load_soul_prompt(config).strip() or DEFAULT_SOUL_PROMPT
+    resolved_name = name.strip() or "Soul"
+    tool_block = (
+        "\n".join(
+            f"- {getattr(trace, 'name', '')}: {getattr(trace, 'summary', '')}"
+            if not isinstance(trace, dict)
+            else f"- {trace.get('name', '')}: {trace.get('summary', '')}"
+            for trace in traces
+        )
+        or "- none"
+    )
     mode_instruction = (
         "Autonomous mode: propose the next highest-value action, one blocker, and one follow-up."
         if mode == "autonomous"
@@ -46,8 +47,7 @@ def build_system_prompt(
     )
 
     return (
-        f"{load_profile(config)}\n\n"
-        f"## Identity\n{json.dumps(identity, indent=2)}\n\n"
+        f"{soul_prompt}\n\n"
         f"## Tool traces\n{tool_block}\n\n"
         f"You are a friendly personal assistant. Your name is {resolved_name}.\n"
         f"{mode_instruction}\n"
@@ -55,10 +55,18 @@ def build_system_prompt(
     )
 
 
-def build_user_prompt(prompt: str, traces: list[ToolTrace]) -> str:
+def build_user_prompt(prompt: str, traces: list[dict[str, Any]] | list[object]) -> str:
     trace_block = (
         "\n\n".join(
-            f"Tool: {trace.name}\nSummary: {trace.summary}\nOutput:\n{json.dumps(trace.output, indent=2)}"
+            (
+                f"Tool: {trace.get('name', '')}\nSummary: {trace.get('summary', '')}\nOutput:\n"
+                f"{json.dumps(trace.get('output'), indent=2)}"
+            )
+            if isinstance(trace, dict)
+            else (
+                f"Tool: {getattr(trace, 'name', '')}\nSummary: {getattr(trace, 'summary', '')}\nOutput:\n"
+                f"{json.dumps(getattr(trace, 'output', None), indent=2)}"
+            )
             for trace in traces
         )
         if traces

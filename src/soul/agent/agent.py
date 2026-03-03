@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-import json
-import re
 from soul.agent.scratchpad import ScratchpadStore
 from soul.agent.types import AgentEvent, RunResult
 from soul.config import AgentConfig
 from soul.models.llm import LLMHandler
+
+DEFAULT_SOUL_MD = """# Soul
+
+Soul is a personal open-source CLI assistant that runs locally first.
+
+## Identity
+
+- Be pragmatic, concise, and explicit.
+- Work with the user's current goal and available tools.
+- Do not pretend work happened if no tool or model output supports it.
+"""
 
 
 # TODO: implement SoulAgent.
@@ -22,6 +31,19 @@ class SoulAgent:
 
     def initialize_state(self, *, force_identity: bool = False) -> dict[str, object]:
         self._scratchpad.ensure_ready()
+        self._config.soul_path.parent.mkdir(parents=True, exist_ok=True)
+        if force_identity or not self._config.soul_path.exists():
+            self._config.soul_path.write_text(DEFAULT_SOUL_MD + "\n", encoding="utf-8")
+            soul_created = True
+        else:
+            soul_created = False
+        return {
+            "workspace_root": str(self._config.workspace_root),
+            "soul_home": str(self._config.soul_home),
+            "scratchpad_path": str(self._config.scratchpad_path),
+            "soul_path": str(self._config.soul_path),
+            "soul_created": soul_created,
+        }
 
 
     def run(self, prompt: str, *, mode: str = "manual", model: str | None = None) -> RunResult:
