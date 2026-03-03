@@ -46,5 +46,5 @@ class SoulAgent:
 
         return RunResult(
             prompt=prompt,
-            reply=reply,
+            reply=result,
         )
