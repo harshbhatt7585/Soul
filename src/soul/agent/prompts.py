@@ -55,24 +55,6 @@ def build_system_prompt(
     )
 
 
-def build_user_prompt(prompt: str, traces: list[dict[str, Any]] | list[object]) -> str:
-    trace_block = (
-        "\n\n".join(
-            (
-                f"Tool: {trace.get('name', '')}\nSummary: {trace.get('summary', '')}\nOutput:\n"
-                f"{json.dumps(trace.get('output'), indent=2)}"
-            )
-            if isinstance(trace, dict)
-            else (
-                f"Tool: {getattr(trace, 'name', '')}\nSummary: {getattr(trace, 'summary', '')}\nOutput:\n"
-                f"{json.dumps(getattr(trace, 'output', None), indent=2)}"
-            )
-            for trace in traces
-        )
-        if traces
-        else "No tools were used for this turn."
-    )
-    return f"User request: {prompt}\n\n{trace_block}"
 
 
 # TODO
