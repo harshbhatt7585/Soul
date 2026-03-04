@@ -21,7 +21,7 @@ def load_soul_prompt(config: AgentConfig) -> str:
     except OSError:
         return DEFAULT_SOUL_PROMPT
 
-
+# TODO: implement build_system_prompt function.
 def build_system_prompt(
     config: AgentConfig,
     *,
@@ -29,30 +29,7 @@ def build_system_prompt(
     name: str,
     traces: list[dict[str, Any]] | list[object],
 ) -> str:
-    soul_prompt = load_soul_prompt(config).strip() or DEFAULT_SOUL_PROMPT
-    resolved_name = name.strip() or "Soul"
-    tool_block = (
-        "\n".join(
-            f"- {getattr(trace, 'name', '')}: {getattr(trace, 'summary', '')}"
-            if not isinstance(trace, dict)
-            else f"- {trace.get('name', '')}: {trace.get('summary', '')}"
-            for trace in traces
-        )
-        or "- none"
-    )
-    mode_instruction = (
-        "Autonomous mode: propose the next highest-value action, one blocker, and one follow-up."
-        if mode == "autonomous"
-        else "Manual mode: respond directly to the user and keep the answer actionable."
-    )
-
-    return (
-        f"{soul_prompt}\n\n"
-        f"## Tool traces\n{tool_block}\n\n"
-        f"You are a friendly personal assistant. Your name is {resolved_name}.\n"
-        f"{mode_instruction}\n"
-        "You run locally on a Python CLI stack. Be explicit about uncertainty and current tool coverage."
-    )
+    pass
 
 
 
