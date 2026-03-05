@@ -11,16 +11,6 @@ from soul.agent.types import AgentEvent, RunResult
 from soul.config import AgentConfig, model_for_mode
 from soul.models.llm import LLMHandler
 
-DEFAULT_SOUL_MD = """# Soul
-
-Soul is a personal open-source CLI assistant that runs locally first.
-
-## Identity
-
-- Be pragmatic, concise, and explicit.
-- Work with the user's current goal and available tools.
-- Do not pretend work happened if no tool or model output supports it.
-"""
 
 # TODO: implement Agent class.
 class Agent:
