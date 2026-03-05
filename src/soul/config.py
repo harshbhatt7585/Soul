@@ -10,6 +10,7 @@ DEFAULT_RESEARCH_MODEL = "llama3.2:1b"
 
 
 def _env_float(name: str, default: float) -> float:
+    # TODO: Warn when invalid float env vars are ignored so configuration mistakes are visible.
     raw = os.environ.get(name)
     if raw is None:
         return default
@@ -20,6 +21,7 @@ def _env_float(name: str, default: float) -> float:
 
 
 def _env_int(name: str, default: int) -> int:
+    # TODO: Warn when invalid integer env vars are ignored so configuration mistakes are visible.
     raw = os.environ.get(name)
     if raw is None:
         return default
@@ -47,6 +49,7 @@ class AgentConfig:
 
 
 def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
+    # TODO: Support reading per-workspace config files in addition to environment variables.
     root = Path(workspace_root or os.getcwd()).resolve()
     soul_home = root / ".soul"
 
@@ -68,6 +71,7 @@ def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
 
 
 def model_for_mode(config: AgentConfig, mode: str, override: str | None = None) -> str:
+    # TODO: Route research mode explicitly and reject unknown modes instead of falling back implicitly.
     if override:
         return override
     if mode == "autonomous":
