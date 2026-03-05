@@ -67,7 +67,5 @@ def tool_identification_prompt(prompt: str):
 
 
 # TODO
-def build_inital_prompt(prompt: str):
-    return (
-        ""
-    )
+def build_respond_prompt(prompt: str):
+    pass
