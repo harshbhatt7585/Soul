@@ -68,4 +68,17 @@ def tool_identification_prompt(prompt: str):
 
 # TODO
 def build_respond_prompt(prompt: str):
-    pass
+    return (
+        "Based on all the current context, respond to the user's request in a concise manner."
+        f"User request: {prompt}"
+        "Return the response in JSON format."
+        f"""For example: 
+        ```json
+        {
+            "text": ...,
+        }
+        ```
+        """
+        
+
+    )
