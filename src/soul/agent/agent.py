@@ -21,12 +21,7 @@ class Agent:
         self.context = []
 
     def initialize_state(self, force_identity: bool = False) -> dict[str, object]:
-        self._config.soul_home.mkdir(parents=True, exist_ok=True)
-        if force_identity or not self._config.soul_path.exists():
-            self._config.soul_path.write_text(DEFAULT_SOUL_MD + "\n", encoding="utf-8")
-            soul_created = True
-        else:
-            soul_created = False
+        pass
     
     def run(self, prompt: str) -> RunResult:
         
