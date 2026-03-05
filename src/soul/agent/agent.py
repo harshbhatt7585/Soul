@@ -18,10 +18,7 @@ class Agent:
         self._config = config
         self._scratchpad = ScratchpadStore(config)
         self._llm_handler = LLMHandler(config)
-        self.context = []
-
-    def initialize_state(self, force_identity: bool = False) -> dict[str, object]:
-        pass
+        self.context = []        
     
     def run(self, prompt: str) -> RunResult:
         
