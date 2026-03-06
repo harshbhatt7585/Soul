@@ -25,14 +25,66 @@ class _HTMLTextExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self._parts: list[str] = []
+        self._ignored_tag_stack: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del attrs
+        if tag.lower() in {"script", "style", "noscript"}:
+            self._ignored_tag_stack.append(tag.lower())
+
+    def handle_endtag(self, tag: str) -> None:
+        lowered = tag.lower()
+        if self._ignored_tag_stack and self._ignored_tag_stack[-1] == lowered:
+            self._ignored_tag_stack.pop()
 
     def handle_data(self, data: str) -> None:
+        if self._ignored_tag_stack:
+            return
         text = " ".join(data.split())
         if text:
             self._parts.append(text)
 
     def text(self) -> str:
         return " ".join(self._parts)
+
+
+class _HTMLMetadataParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._text_extractor = _HTMLTextExtractor()
+        self._title_parts: list[str] = []
+        self._links: list[str] = []
+        self._in_title = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._text_extractor.handle_starttag(tag, attrs)
+        lowered = tag.lower()
+        if lowered == "title":
+            self._in_title = True
+        if lowered == "a":
+            href = dict(attrs).get("href")
+            if href:
+                self._links.append(href)
+
+    def handle_endtag(self, tag: str) -> None:
+        self._text_extractor.handle_endtag(tag)
+        if tag.lower() == "title":
+            self._in_title = False
+
+    def handle_data(self, data: str) -> None:
+        self._text_extractor.handle_data(data)
+        if self._in_title:
+            text = " ".join(data.split())
+            if text:
+                self._title_parts.append(text)
+
+    def extract(self) -> dict[str, Any]:
+        title = " ".join(self._title_parts).strip()
+        return {
+            "title": title,
+            "text": self._text_extractor.text(),
+            "links": self._links,
+        }
 
 
 class MemoryRecallAgentTool(Tools):
@@ -97,9 +149,9 @@ class WebFetchAgentTool(Tools):
 
         text = raw.decode("utf-8", errors="replace")
         if "html" in content_type.lower():
-            parser = _HTMLTextExtractor()
+            parser = _HTMLMetadataParser()
             parser.feed(text)
-            text = parser.text()
+            text = parser.extract()["text"]
 
         excerpt = " ".join(text.split())[: self._config.max_excerpt_chars]
         return {
@@ -111,12 +163,41 @@ class WebFetchAgentTool(Tools):
         }
 
 
+class HTMLPraserAgentTool(Tools):
+    description = "Parse raw HTML into plain text and simple metadata."
+
+    def __init__(self, config: AgentConfig) -> None:
+        super().__init__("html_praser")
+        self._config = config
+
+    def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
+        html = str(args.get("html", ""))
+        if not html.strip():
+            return {"ok": False, "tool": self.name, "error": "missing html"}
+
+        parser = _HTMLMetadataParser()
+        parser.feed(html)
+        parsed = parser.extract()
+        text = " ".join(parsed["text"].split())[: self._config.max_excerpt_chars]
+        links = parsed["links"][: self._config.search_limit]
+
+        return {
+            "ok": True,
+            "tool": self.name,
+            "title": parsed["title"],
+            "text": text,
+            "links": links,
+            "link_count": len(parsed["links"]),
+        }
+
+
 def build_default_tools(config: AgentConfig) -> list[Tools]:
     return [
         MemoryRecallAgentTool(),
         MemoryWriteAgentTool(),
         WebSearchAgentTool(),
         WebFetchAgentTool(config),
+        HTMLPraserAgentTool(config),
     ]
 
 
@@ -128,7 +209,10 @@ def get_tools() -> list[str]:
             MemoryWriteAgentTool(),
             WebSearchAgentTool(),
         ]
-    ] + [f"web_fetch: {WebFetchAgentTool.description}"]
+    ] + [
+        f"web_fetch: {WebFetchAgentTool.description}",
+        f"html_praser: {HTMLPraserAgentTool.description}",
+    ]
 
 
 def format_tool_result(result: dict[str, Any]) -> str:
@@ -141,6 +225,7 @@ __all__ = [
     "MemoryWriteAgentTool",
     "WebSearchAgentTool",
     "WebFetchAgentTool",
+    "HTMLPraserAgentTool",
     "build_default_tools",
     "format_tool_result",
     "get_tools",

@@ -83,8 +83,10 @@ class Agent:
                 model=model,
                 prompt=build_planning_prompt(planning_input, self.context),
             )
+            print("Plan", plan)
             todo = plan.get("todo", [])
             tool_calls = plan.get("tool_calls", [])
+
 
             if not isinstance(todo, list):
                 todo = []
@@ -110,6 +112,9 @@ class Agent:
             )
 
             tool_results = self._run_tool_calls(tool_calls)
+
+            print(tool_results)
+
             if tool_results:
                 self.context.append({"role": "tools", "content": tool_results})
                 events.append(
