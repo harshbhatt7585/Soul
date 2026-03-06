@@ -8,7 +8,7 @@ from soul.agent.scratchpad import ScratchpadStore
 from soul.agent.tools import build_default_tools
 from soul.agent.types import AgentEvent, RunResult
 from soul.config import AgentConfig, model_for_mode
-from soul.models.llm import LLMHandler
+from soul.models.llm import LLMHandler, LLMProvider
 
 
 def _extract_json(raw: str) -> dict[str, Any]:
@@ -32,10 +32,10 @@ def _extract_json(raw: str) -> dict[str, Any]:
 
 
 class Agent:
-    def __init__(self, config: AgentConfig) -> None:
+    def __init__(self, config: AgentConfig, llm_provider: LLMProvider | None = None) -> None:
         self._config = config
         self._scratchpad = ScratchpadStore(config)
-        self._llm_handler = LLMHandler(config)
+        self._llm_handler = LLMHandler(config, provider=llm_provider)
         self._tools = {tool.name: tool for tool in build_default_tools(config)}
         self.context: list[dict[str, Any]] = []
         self.max_iter = 3
