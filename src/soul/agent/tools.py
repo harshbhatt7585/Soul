@@ -7,6 +7,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from soul.agent.memory import MemoryStore
 from soul.config import AgentConfig
 
 
@@ -90,21 +91,53 @@ class _HTMLMetadataParser(HTMLParser):
 class MemoryRecallAgentTool(Tools):
     description = "Recall relevant memory entries for the current prompt."
 
-    def __init__(self) -> None:
+    def __init__(self, config: AgentConfig) -> None:
         super().__init__("memory_recall")
+        self._config = config
+        self._store = MemoryStore(config)
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"ok": False, "tool": self.name, "error": "memory recall is not implemented yet"}
+        query = str(args.get("query", "")).strip()
+        if not query:
+            return {"ok": False, "tool": self.name, "error": "missing query"}
+
+        limit = args.get("limit", self._config.search_limit)
+        try:
+            max_results = max(1, min(int(limit), self._config.search_limit))
+        except (TypeError, ValueError):
+            max_results = self._config.search_limit
+
+        matches = self._store.search(query=query, limit=max_results)
+        return {
+            "ok": True,
+            "tool": self.name,
+            "query": query,
+            "memories": [entry.to_dict() for entry in matches],
+            "memory_count": len(matches),
+        }
 
 
 class MemoryWriteAgentTool(Tools):
     description = "Write a note, preference, or outcome into local memory."
 
-    def __init__(self) -> None:
+    def __init__(self, config: AgentConfig) -> None:
         super().__init__("memory_write")
+        self._store = MemoryStore(config)
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"ok": False, "tool": self.name, "error": "memory write is not implemented yet"}
+        text = str(args.get("text", "")).strip()
+        if not text:
+            return {"ok": False, "tool": self.name, "error": "missing text"}
+
+        kind = str(args.get("kind", "note")).strip().lower() or "note"
+        raw_tags = args.get("tags", [])
+        tags = [str(tag).strip().lower() for tag in raw_tags if str(tag).strip()] if isinstance(raw_tags, list) else []
+        entry = self._store.append(text=text, kind=kind, tags=tags)
+        return {
+            "ok": True,
+            "tool": self.name,
+            "memory": entry.to_dict(),
+        }
 
 
 class WebSearchAgentTool(Tools):
@@ -275,8 +308,8 @@ class HTMLPraserAgentTool(Tools):
 
 def build_default_tools(config: AgentConfig) -> list[Tools]:
     return [
-        MemoryRecallAgentTool(),
-        MemoryWriteAgentTool(),
+        MemoryRecallAgentTool(config),
+        MemoryWriteAgentTool(config),
         WebSearchAgentTool(config),
         WebFetchAgentTool(config),
         HTMLPraserAgentTool(config),

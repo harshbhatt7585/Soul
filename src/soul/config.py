@@ -3,15 +3,31 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 
-# root directory of the project
-root_dir = Path(__file__).parent.parent
-load_dotenv(root_dir / ".env")
+try:
+    from dotenv import load_dotenv as _load_dotenv
+except ModuleNotFoundError:
+    _load_dotenv = None
 
 DEFAULT_MANUAL_MODEL = "llama3.2:1b"
 DEFAULT_AUTONOMOUS_MODEL = "qwen2.5:0.5b"
 DEFAULT_RESEARCH_MODEL = "llama3.2:1b"
+
+
+def _load_env_file(path: Path) -> None:
+    if _load_dotenv is not None:
+        _load_dotenv(path)
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
 
 
 def _env_float(name: str, default: float) -> float:
@@ -41,6 +57,7 @@ class AgentConfig:
     workspace_root: Path
     soul_home: Path
     scratchpad_path: Path
+    memory_path: Path
     soul_path: Path
     ollama_base_url: str
     manual_model: str
@@ -57,12 +74,14 @@ class AgentConfig:
 def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
     # TODO: Support reading per-workspace config files in addition to environment variables.
     root = Path(workspace_root or os.getcwd()).resolve()
+    _load_env_file(root / ".env")
     soul_home = root / ".soul"
 
     return AgentConfig(
         workspace_root=root,
         soul_home=soul_home,
         scratchpad_path=soul_home / "scratchpad.jsonl",
+        memory_path=soul_home / "memory.jsonl",
         soul_path=root / "SOUL.md",
         ollama_base_url=os.environ.get("SOUL_OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
         manual_model=os.environ.get("SOUL_MANUAL_MODEL", DEFAULT_MANUAL_MODEL),

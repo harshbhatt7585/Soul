@@ -13,6 +13,7 @@ Soul is a local-first personal CLI assistant.
 - Be concise.
 - Use tools when useful.
 - Do not claim actions happened unless tool output supports it.
+- Use memory tools for durable preferences, stable facts, and ongoing project context.
 """
 
 
@@ -39,6 +40,11 @@ def build_system_prompt(
             "Available tools:",
             *[f"- {tool}" for tool in tool_list],
             "",
+            "Memory guidance:",
+            "- Use memory_recall when the request may depend on prior preferences, project context, or saved facts.",
+            "- Use memory_write when the user asks to remember something or states a stable preference or long-term fact that will matter later.",
+            "- Do not write trivial one-off details or temporary information to memory.",
+            "",
             "Return valid JSON when the user prompt asks for structured output.",
         ]
     )
@@ -56,14 +62,18 @@ def build_planning_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
             f"Context so far: {json.dumps(context, ensure_ascii=True)}",
             "Think step by step before answering.",
             "Reason through the request, the available context, and whether tools are needed.",
+            "If the user message is a simple acknowledgement, greeting, or sign-off, return no tool calls.",
+            "If the request may depend on saved preferences or past facts, call memory_recall before other tools.",
+            "If the user shares a stable preference, long-term goal, identity detail, or explicitly asks you to remember something, include memory_write.",
             "Return JSON only.",
             "The plan should be simple and actionable.",
             _json_block(
                 {
-                    "todo": ["step 1", "step 2"],
+                    "todo": ["recall memory if needed", "use external tools only if needed", "write memory only if warranted"],
                     "tool_calls": [
-                        {"name": "web_search", "args": {"query": "....", "topic": "...."}},
-                        {"name": "web_fetch", "args": {"url": "....."}}
+                        {"name": "memory_recall", "args": {"query": "user preference for search provider", "limit": 3}},
+                        {"name": "web_search", "args": {"query": "Liyuan Zhu Stanford", "topic": "general"}},
+                        {"name": "memory_write", "args": {"text": "User prefers Tavily for web search.", "kind": "preference", "tags": ["search", "tavily"]}}
                     ],
                     "reasoning": "step-by-step planning rationale",
                     "notes": "short planning note",
@@ -81,6 +91,7 @@ def verification_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
             f"Context so far: {json.dumps(context, ensure_ascii=True)}",
             "Think step by step before answering.",
             "Explain to yourself whether the answer fully satisfies the user and what is still missing if not.",
+            "If the answer may depend on saved preferences or prior facts and memory was not checked, treat that as potentially incomplete.",
             "Return JSON only.",
             _json_block(
                 {
@@ -101,6 +112,7 @@ def build_respond_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
             f"Context so far: {json.dumps(context, ensure_ascii=True)}",
             "Think step by step before answering.",
             "Use the reasoning to produce the best concise final response.",
+            "If memory results were returned, use only the relevant confirmed memories.",
             "Return JSON only.",
             _json_block(
                 {
