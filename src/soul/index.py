@@ -12,12 +12,6 @@ from soul.config import load_agent_config
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="soul", description="Local CLI assistant.")
     parser.add_argument("prompt", nargs="*", help="One-shot prompt to run.")
-    parser.add_argument(
-        "--mode",
-        choices=["manual", "autonomous", "research"],
-        default="manual",
-        help="Agent mode.",
-    )
     parser.add_argument("--model", help="Override the configured model.")
     parser.add_argument(
         "--workspace",
@@ -48,10 +42,10 @@ def main() -> int:
 
     prompt = _prompt_from_args_or_stdin(args)
     if prompt is None:
-        return run_repl(agent, mode=args.mode, model=args.model)
+        return run_repl(agent, model=args.model)
 
     try:
-        result = agent.run(prompt, mode=args.mode, model=args.model)
+        result = agent.run(prompt, model=args.model)
     except KeyboardInterrupt:
         print(file=sys.stderr)
         return 130

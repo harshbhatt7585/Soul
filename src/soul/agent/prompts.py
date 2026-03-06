@@ -26,7 +26,6 @@ def load_soul_prompt(config: AgentConfig) -> str:
 def build_system_prompt(
     config: AgentConfig,
     *,
-    mode: str,
     name: str,
     tools: list[str] | None = None,
 ) -> str:
@@ -37,7 +36,6 @@ def build_system_prompt(
             soul_prompt.strip(),
             "",
             f"Assistant name: {name}",
-            f"Operating mode: {mode}",
             "Available tools:",
             *[f"- {tool}" for tool in tool_list],
             "",
@@ -62,7 +60,6 @@ def build_planning_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
             "The plan should be simple and actionable.",
             _json_block(
                 {
-                    "mode": "answer_directly_or_use_tools",
                     "todo": ["step 1", "step 2"],
                     "tool_calls": [
                         {"name": "web_fetch", "args": {"url": "https://example.com"}}

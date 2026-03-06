@@ -7,7 +7,7 @@ from soul.agent.prompts import build_planning_prompt, build_respond_prompt, buil
 from soul.agent.scratchpad import ScratchpadStore
 from soul.agent.tools import build_default_tools
 from soul.agent.types import AgentEvent, RunResult
-from soul.config import AgentConfig, model_for_mode
+from soul.config import AgentConfig
 from soul.models.llm import LLMHandler, LLMProvider
 
 
@@ -40,15 +40,14 @@ class Agent:
         self.context: list[dict[str, Any]] = []
         self.max_iter = 3
 
-    def _call_llm(self, *, mode: str, model: str | None, prompt: str) -> dict[str, Any]:
+    def _call_llm(self, *, model: str | None, prompt: str) -> dict[str, Any]:
         system_prompt = build_system_prompt(
             self._config,
-            mode=mode,
             name="Soul",
             tools=[f"{name}: {tool.description}" for name, tool in self._tools.items()],
         )
         raw = self._llm_handler.generate(
-            model=model_for_mode(self._config, mode, model),
+            model=model or self._config.manual_model,
             system=system_prompt,
             prompt=prompt,
         )
@@ -70,7 +69,7 @@ class Agent:
             results.append(tool(args))
         return results
 
-    def run(self, prompt: str, *, mode: str = "manual", model: str | None = None) -> RunResult:
+    def run(self, prompt: str, *, model: str | None = None) -> RunResult:
         self.context.append({"role": "user", "content": prompt})
         events: list[AgentEvent] = []
         verification_feedback = ""
@@ -81,12 +80,10 @@ class Agent:
                 planning_input = f"{prompt}\nPrevious verification feedback: {verification_feedback}"
 
             plan = self._call_llm(
-                mode=mode,
                 model=model,
                 prompt=build_planning_prompt(planning_input, self.context),
             )
             todo = plan.get("todo", [])
-            plan_mode = str(plan.get("mode", "answer_directly"))
             tool_calls = plan.get("tool_calls", [])
 
             if not isinstance(todo, list):
@@ -98,7 +95,6 @@ class Agent:
                 {
                     "role": "planner",
                     "content": {
-                        "mode": plan_mode,
                         "todo": todo,
                         "tool_calls": tool_calls,
                         "notes": plan.get("notes", ""),
@@ -109,7 +105,7 @@ class Agent:
                 AgentEvent(
                     kind="planning",
                     title=f"Iteration {iteration}",
-                    detail=f"mode={plan_mode}; todo={json.dumps(todo, ensure_ascii=True)}",
+                    detail=f"todo={json.dumps(todo, ensure_ascii=True)}",
                 )
             )
 
@@ -125,7 +121,6 @@ class Agent:
                 )
 
             verification = self._call_llm(
-                mode=mode,
                 model=model,
                 prompt=verification_prompt(prompt, self.context),
             )
@@ -141,7 +136,6 @@ class Agent:
             )
 
             response = self._call_llm(
-                mode=mode,
                 model=model,
                 prompt=build_respond_prompt(prompt, self.context),
             )
@@ -154,7 +148,7 @@ class Agent:
                     reply=reply or "I could not produce a final response.",
                     events=events,
                     iterations=iteration,
-                    meta={"plan_mode": plan_mode, "todo": todo},
+                    meta={"todo": todo},
                 )
 
         return RunResult(reply="I could not complete the request.", events=events, iterations=self.max_iter)
