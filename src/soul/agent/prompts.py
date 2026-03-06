@@ -56,6 +56,8 @@ def build_planning_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
             "Plan the next agent step.",
             f"User request: {prompt}",
             f"Context so far: {json.dumps(context, ensure_ascii=True)}",
+            "Think step by step before answering.",
+            "Reason through the request, the available context, and whether tools are needed.",
             "Return JSON only.",
             "The plan should be simple and actionable.",
             _json_block(
@@ -65,6 +67,7 @@ def build_planning_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
                     "tool_calls": [
                         {"name": "web_fetch", "args": {"url": "https://example.com"}}
                     ],
+                    "reasoning": "step-by-step planning rationale",
                     "notes": "short planning note",
                 }
             ),
@@ -78,10 +81,13 @@ def verification_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
             "Verify whether the current context is sufficient to answer the user.",
             f"User request: {prompt}",
             f"Context so far: {json.dumps(context, ensure_ascii=True)}",
+            "Think step by step before answering.",
+            "Explain to yourself whether the answer fully satisfies the user and what is still missing if not.",
             "Return JSON only.",
             _json_block(
                 {
                     "ok": True,
+                    "reasoning": "step-by-step verification rationale",
                     "feedback": "empty if complete, otherwise explain what is missing",
                 }
             ),
@@ -95,7 +101,14 @@ def build_respond_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
             "Write the final response to the user using the available context.",
             f"User request: {prompt}",
             f"Context so far: {json.dumps(context, ensure_ascii=True)}",
+            "Think step by step before answering.",
+            "Use the reasoning to produce the best concise final response.",
             "Return JSON only.",
-            _json_block({"text": "final assistant response"}),
+            _json_block(
+                {
+                    "reasoning": "step-by-step response rationale",
+                    "text": "final assistant response",
+                }
+            ),
         ]
     )
