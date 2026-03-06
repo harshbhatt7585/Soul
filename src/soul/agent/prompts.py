@@ -125,15 +125,32 @@ def verification_prompt(prompt: str, *, candidate_answer: str = "", plan_summary
     )
 
 
-def build_respond_prompt(prompt: str, *, plan_summary: str = "", tool_summary: str = "") -> str:
+def build_respond_prompt(
+    prompt: str,
+    *,
+    plan_summary: str = "",
+    tool_summary: str = "",
+    retry_count: int = 0,
+) -> str:
     plan_text = plan_summary.strip()
     tools_text = tool_summary.strip()
+    retry_instructions: list[str] = []
+    if retry_count > 0:
+        retry_instructions.extend(
+            [
+                f"This is response retry attempt {retry_count + 1}.",
+                "Your previous response was invalid because text was empty.",
+                "Return JSON with a non-empty text field.",
+                "Do not leave text blank.",
+            ]
+        )
     return "\n".join(
         [
             "Write the final response to the user using the available context.",
             f"User request: {prompt}",
             *([f"Plan summary: {plan_text}"] if plan_text else []),
             *([f"Tool summary: {tools_text}"] if tools_text else []),
+            *retry_instructions,
             "Think step by step before answering.",
             "Use the reasoning to produce the best concise final response.",
             "If memory results were returned, use only the relevant confirmed memories.",

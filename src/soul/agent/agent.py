@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from email import message
 import json
 from typing import Any
 
@@ -137,6 +138,51 @@ class Agent:
         events.append(event)
         self._scratchpad.append(event)
 
+    def _generate_response(
+        self,
+        *,
+        model: str | None,
+        prompt: str,
+        plan_summary: str,
+        tool_summary: str,
+        tool_messages: list[ChatMessage],
+        events: list[AgentEvent],
+        iteration: int,
+    ) -> tuple[str, str]:
+        final_reply = ""
+        final_reasoning = ""
+        for attempt in range(3):
+            response = self._call_llm_json(
+                model=model,
+                prompt=build_respond_prompt(
+                    prompt,
+                    plan_summary=plan_summary,
+                    tool_summary=tool_summary,
+                    retry_count=attempt,
+                ),
+                extra_messages=tool_messages,
+            )
+            reply = str(response.get("text", "")).strip()
+            reasoning = str(response.get("reasoning", "")).strip()
+            final_reply = reply
+            final_reasoning = reasoning
+            self._record_event(
+                events,
+                kind="response_attempt",
+                title=f"Iteration {iteration} Attempt {attempt + 1}",
+                detail=json.dumps(
+                    {
+                        "text": reply,
+                        "reasoning": reasoning,
+                    },
+                    ensure_ascii=True,
+                ),
+            )
+            if reply:
+                return reply, reasoning
+
+        return final_reply, final_reasoning
+
     def run(self, prompt: str, *, model: str | None = None) -> RunResult:
         self.context.append({"role": "user", "content": prompt})
         events: list[AgentEvent] = []
@@ -145,60 +191,22 @@ class Agent:
         for iteration in range(1, self.max_iter + 1):
             plan = self._call_llm_json(
                 model=model,
-                prompt=build_planning_prompt(prompt, prior_feedback=verification_feedback),
-            )
-            todo = plan.get("todo", [])
-            plan_reasoning = str(plan.get("reasoning", "")).strip()
-
-            if not isinstance(todo, list):
-                todo = []
-
-            self._record_event(
-                events,
-                kind="planning",
-                title=f"Iteration {iteration}",
-                detail=json.dumps(
-                    {
-                        "todo": todo,
-                        "reasoning": plan_reasoning,
-                        "notes": plan.get("notes", ""),
-                    },
-                    ensure_ascii=True,
-                ),
+                prompt=build_planning_prompt(messages=self.context)
+,
             )
 
-            plan_summary = json.dumps(
-                {
-                    "todo": todo,
-                    "reasoning": plan_reasoning,
-                    "notes": plan.get("notes", ""),
-                },
-                ensure_ascii=True,
-            )
-
+            self.context.append({"role": "assistant", "content": plan})
+            
             tool_identification = self._chat(
                 model=model,
-                prompt=build_tool_identification_prompt(
-                    prompt,
-                    plan_summary=plan_summary,
-                    prior_feedback=verification_feedback,
-                ),
+                prompt=build_tool_identification_prompt(messages=self.context)
                 tools=self._ollama_tools,
             )
+
+            self.context.append({"role": "assistant", "content": tool_identification})
+
             tool_calls = [self._normalize_tool_call(tool_call) for tool_call in tool_identification.tool_calls]
             tool_calls = [tool_call for tool_call in tool_calls if tool_call.get("name")]
-            self._record_event(
-                events,
-                kind="tool_identification",
-                title=f"Iteration {iteration}",
-                detail=json.dumps(
-                    {
-                        "tool_calls": tool_calls,
-                        "assistant_content": tool_identification.content,
-                    },
-                    ensure_ascii=True,
-                ),
-            )
 
             tool_results = self._run_tool_calls(tool_calls)
             tool_summary = json.dumps(tool_results, ensure_ascii=True) if tool_results else ""
@@ -221,60 +229,32 @@ class Agent:
                             "content": json.dumps(result, ensure_ascii=True),
                         }
                     )
-                self._record_event(
-                    events,
-                    kind="tool_execution",
-                    title=f"Iteration {iteration}",
-                    detail=json.dumps(tool_results, ensure_ascii=True),
-                )
-
-            response = self._call_llm_json(
+            
+            reply = self._chat(
                 model=model,
-                prompt=build_respond_prompt(prompt, plan_summary=plan_summary, tool_summary=tool_summary),
+                prompt=build_respond_prompt(messages=self.context),
                 extra_messages=tool_messages,
             )
-            reply = str(response.get("text", "")).strip()
-            response_reasoning = str(response.get("reasoning", "")).strip()
-            if reply:
-                self.context.append({"role": "assistant", "content": reply})
-            self._record_event(
-                events,
-                kind="response",
-                title=f"Iteration {iteration}",
-                detail=json.dumps(
-                    {
-                        "text": reply,
-                        "reasoning": response_reasoning,
-                    },
-                    ensure_ascii=True,
-                ),
-            )
+            self.context.append({"role": "assistant", "content": reply})
+
 
             verification = self._call_llm_json(
                 model=model,
                 prompt=verification_prompt(
                     prompt,
-                    candidate_answer=reply,
-                    plan_summary=plan_summary,
-                    tool_summary=tool_summary,
+                    candidate_answer="",
                 ),
                 extra_messages=tool_messages,
             )
+
             verification_feedback = str(verification.get("feedback", "")).strip()
             ok = bool(verification.get("ok")) and not verification_feedback
-            self._record_event(
-                events,
-                kind="verification",
-                title=f"Iteration {iteration}",
-                detail=json.dumps(verification, ensure_ascii=True),
-            )
 
             if ok or iteration == self.max_iter:
                 return RunResult(
                     reply=reply or "I could not produce a final response.",
                     events=events,
                     iterations=iteration,
-                    meta={"todo": todo},
                 )
 
         return RunResult(reply="I could not complete the request.", events=events, iterations=self.max_iter)
