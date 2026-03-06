@@ -7,7 +7,9 @@ authors = [
     { name = "Harsh Bhatt", email = "harshbhatt7585@gmail.com" }
 ]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "python-dotenv>=1.0.1",
+]
 
 [project.scripts]
 soul = "soul.index:main"

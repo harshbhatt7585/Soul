@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# root directory of the project
+root_dir = Path(__file__).parent.parent
+load_dotenv(root_dir / ".env")
 
 DEFAULT_MANUAL_MODEL = "llama3.2:1b"
 DEFAULT_AUTONOMOUS_MODEL = "qwen2.5:0.5b"
