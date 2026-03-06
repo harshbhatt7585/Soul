@@ -153,16 +153,6 @@ class Agent:
             if not isinstance(todo, list):
                 todo = []
 
-            self.context.append(
-                {
-                    "role": "planner",
-                    "content": {
-                        "todo": todo,
-                        "reasoning": plan_reasoning,
-                        "notes": plan.get("notes", ""),
-                    },
-                }
-            )
             self._record_event(
                 events,
                 kind="planning",
