@@ -65,6 +65,26 @@ def tool_identification_prompt(prompt: str):
         ""
     )
 
+def verification_prompt(prompt: str, context: list[str]):
+    return (
+        f"User request: {prompt}"
+        f"Context: {context}"
+        "Think step by step"
+        "1. Identify does the answer provided by the model answer the user's request?"
+        "2. If yes, return True, if no, return False."
+        "3. Return the response in JSON format."
+        f"""For example: 
+        ```json
+        {
+            "verification": ...,
+            "feedback": ...,
+        }
+        ```
+        """
+    )
+
+    
+
 
 # TODO
 def build_respond_prompt(prompt: str):
@@ -79,6 +99,6 @@ def build_respond_prompt(prompt: str):
         }
         ```
         """
-        
+
 
     )
