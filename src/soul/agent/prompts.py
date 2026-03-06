@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from soul.agent.tools import get_tools
 from soul.config import AgentConfig
 
 DEFAULT_SOUL_PROMPT = """# Soul
@@ -21,84 +22,80 @@ def load_soul_prompt(config: AgentConfig) -> str:
     except OSError:
         return DEFAULT_SOUL_PROMPT
 
-# TODO: implement build_system_prompt function.
+
 def build_system_prompt(
     config: AgentConfig,
     *,
     mode: str,
     name: str,
-    tools: list[str],
+    tools: list[str] | None = None,
 ) -> str:
-    return (
-        "You are a personal assistant to help user to learn, study, understand and research."
-        "You have given user context, use that to talk to user accordingly."
-        "You have given tools to use to help answer user's request.",
-        "GIVEN tools: {tools}",
+    tool_list = tools or get_tools()
+    soul_prompt = load_soul_prompt(config)
+    return "\n".join(
+        [
+            soul_prompt.strip(),
+            "",
+            f"Assistant name: {name}",
+            f"Operating mode: {mode}",
+            "Available tools:",
+            *[f"- {tool}" for tool in tool_list],
+            "",
+            "Return valid JSON when the user prompt asks for structured output.",
+        ]
     )
 
 
+def _json_block(schema: dict[str, Any]) -> str:
+    return json.dumps(schema, indent=2)
 
 
-# TODO
-def build_planning_prompt(prompt: str):
-    return (
-        "Think step by step and plan"
-        "1. What is the user's request?"
-        "2. What is the user's current context?"
-        "3. Identify do we need any tools for the user's request? If yes, identify the best tool to use to answer user's request?"
-        "4. Create a todo list to complete the user's request which inlcude steps to complete the user's request and the tool to use to complete the request."
-        "5. Return the response in JSON format."
-        
-        f"""For example: 
-        ```json
-        {
-            "plan": ...,
-            "tools": [tool_name_1, tool_name_2, ...]
-        }
-        ```
-        """
+def build_planning_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        [
+            "Plan the next agent step.",
+            f"User request: {prompt}",
+            f"Context so far: {json.dumps(context, ensure_ascii=True)}",
+            "Return JSON only.",
+            "The plan should be simple and actionable.",
+            _json_block(
+                {
+                    "mode": "answer_directly_or_use_tools",
+                    "todo": ["step 1", "step 2"],
+                    "tool_calls": [
+                        {"name": "web_fetch", "args": {"url": "https://example.com"}}
+                    ],
+                    "notes": "short planning note",
+                }
+            ),
+        ]
     )
 
-# TODO
-def tool_identification_prompt(prompt: str):
-    return (
-        ""
+
+def verification_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        [
+            "Verify whether the current context is sufficient to answer the user.",
+            f"User request: {prompt}",
+            f"Context so far: {json.dumps(context, ensure_ascii=True)}",
+            "Return JSON only.",
+            _json_block(
+                {
+                    "ok": True,
+                    "feedback": "empty if complete, otherwise explain what is missing",
+                }
+            ),
+        ]
     )
 
-def verification_prompt(prompt: str, context: list[str]):
-    return (
-        f"User request: {prompt}"
-        f"Context: {context}"
-        "Think step by step"
-        "1. Identify does the answer provided by the model answer the user's request?"
-        "2. If yes, return True, if no, return False."
-        "3. Return the response in JSON format."
-        f"""For example: 
-        ```json
-        {
-            "verification": ...,
-            "feedback": ...,
-        }
-        ```
-        """
-    )
 
-    
-
-
-# TODO
-def build_respond_prompt(prompt: str):
-    return (
-        "Based on all the current context, respond to the user's request in a concise manner."
-        f"User request: {prompt}"
-        "Return the response in JSON format."
-        f"""For example: 
-        ```json
-        {
-            "text": ...,
-        }
-        ```
-        """
-
-
+def build_respond_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        [
+            "Write the final response to the user using the available context.",
+            f"User request: {prompt}",
+            f"Context so far: {json.dumps(context, ensure_ascii=True)}",
+            "Return JSON only.",
+            _json_block({"text": "final assistant response"}),
+        ]
     )

@@ -23,6 +23,10 @@ class ScratchpadStore:
         with self._path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event.to_dict(), ensure_ascii=True) + "\n")
 
+    def reset(self) -> None:
+        self.ensure_ready()
+        self._path.write_text("", encoding="utf-8")
+
     def recent(self, limit: int = 12) -> list[AgentEvent]:
         # TODO: Support filtering and pagination once scratchpad replay is used for longer-running sessions.
         self.ensure_ready()
