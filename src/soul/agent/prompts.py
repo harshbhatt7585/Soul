@@ -71,9 +71,9 @@ def build_planning_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
                 {
                     "todo": ["recall memory if needed", "use external tools only if needed", "write memory only if warranted"],
                     "tool_calls": [
-                        {"name": "memory_recall", "args": {"query": "user preference for search provider", "limit": 3}},
-                        {"name": "web_search", "args": {"query": "Liyuan Zhu Stanford", "topic": "general"}},
-                        {"name": "memory_write", "args": {"text": "User prefers Tavily for web search.", "kind": "preference", "tags": ["search", "tavily"]}}
+                        {"name": "memory_recall", "args": {"query": "<query>", "limit": 3}},
+                        {"name": "web_search", "args": {"query": "<query>", "topic": "<general_or_news>"}},
+                        {"name": "memory_write", "args": {"text": "<text>", "kind": "<kind>", "tags": ["<tag>"]}}
                     ],
                     "reasoning": "step-by-step planning rationale",
                     "notes": "short planning note",
