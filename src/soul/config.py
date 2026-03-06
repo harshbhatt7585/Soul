@@ -46,6 +46,7 @@ class AgentConfig:
     max_excerpt_chars: int
     search_limit: int
     user_agent: str
+    tavily_api_key: str
 
 
 def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
@@ -67,6 +68,7 @@ def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
         max_excerpt_chars=_env_int("SOUL_MAX_EXCERPT_CHARS", 4_000),
         search_limit=_env_int("SOUL_SEARCH_LIMIT", 5),
         user_agent=os.environ.get("SOUL_USER_AGENT", "soul/0.1 (+https://github.com/harshbhatt/soul)"),
+        tavily_api_key=os.environ.get("TAVILY_API_KEY", "").strip(),
     )
 
 

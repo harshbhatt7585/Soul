@@ -62,6 +62,7 @@ def build_planning_prompt(prompt: str, context: list[dict[str, Any]]) -> str:
                 {
                     "todo": ["step 1", "step 2"],
                     "tool_calls": [
+                        {"name": "web_search", "args": {"query": "Liyuan Zhu Stanford", "topic": "general"}},
                         {"name": "web_fetch", "args": {"url": "https://example.com"}}
                     ],
                     "reasoning": "step-by-step planning rationale",

@@ -108,21 +108,103 @@ class MemoryWriteAgentTool(Tools):
 
 
 class WebSearchAgentTool(Tools):
-    description = "Search the web with DuckDuckGo HTML results."
+    description = "Search the web with Tavily and return structured results."
 
-    def __init__(self) -> None:
+    def __init__(self, config: AgentConfig) -> None:
         super().__init__("web_search")
+        self._config = config
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         query = str(args.get("query", "")).strip()
         if not query:
             return {"ok": False, "tool": self.name, "error": "missing query"}
-        return {
-            "ok": False,
+        if not self._config.tavily_api_key:
+            return {"ok": False, "tool": self.name, "error": "missing TAVILY_API_KEY", "query": query}
+
+        limit = args.get("limit", self._config.search_limit)
+        try:
+            max_results = max(1, min(int(limit), self._config.search_limit))
+        except (TypeError, ValueError):
+            max_results = self._config.search_limit
+
+        topic = str(args.get("topic", "general")).strip().lower() or "general"
+        if topic not in {"general", "news"}:
+            topic = "general"
+
+        payload = json.dumps(
+            {
+                "query": query,
+                "topic": topic,
+                "max_results": max_results,
+                "search_depth": "basic",
+                "include_answer": False,
+                "include_raw_content": False,
+            }
+        ).encode("utf-8")
+        request = Request(
+            "https://api.tavily.com/search",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {self._config.tavily_api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": self._config.user_agent,
+            },
+            method="POST",
+        )
+
+        try:
+            with urlopen(request, timeout=self._config.request_timeout_seconds) as response:
+                body = response.read(self._config.max_document_bytes).decode("utf-8", errors="replace")
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            return {
+                "ok": False,
+                "tool": self.name,
+                "error": f"HTTP {exc.code} while searching Tavily",
+                "query": query,
+                "detail": detail[: self._config.max_excerpt_chars],
+            }
+        except URLError as exc:
+            return {"ok": False, "tool": self.name, "error": f"network error while searching Tavily: {exc}", "query": query}
+
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            return {
+                "ok": False,
+                "tool": self.name,
+                "error": "invalid JSON returned by Tavily",
+                "query": query,
+            }
+
+        raw_results = parsed.get("results", [])
+        if not isinstance(raw_results, list):
+            raw_results = []
+
+        results: list[dict[str, Any]] = []
+        for item in raw_results[:max_results]:
+            if not isinstance(item, dict):
+                continue
+            results.append(
+                {
+                    "title": str(item.get("title", "")).strip(),
+                    "url": str(item.get("url", "")).strip(),
+                    "snippet": str(item.get("content", "")).strip()[: self._config.max_excerpt_chars],
+                }
+            )
+
+        response_payload = {
+            "ok": True,
             "tool": self.name,
-            "error": "web search is not implemented yet",
             "query": query,
+            "topic": topic,
+            "results": results,
+            "result_count": len(results),
         }
+        answer = parsed.get("answer")
+        if isinstance(answer, str) and answer.strip():
+            response_payload["answer"] = answer.strip()[: self._config.max_excerpt_chars]
+        return response_payload
 
 
 class WebFetchAgentTool(Tools):
@@ -195,7 +277,7 @@ def build_default_tools(config: AgentConfig) -> list[Tools]:
     return [
         MemoryRecallAgentTool(),
         MemoryWriteAgentTool(),
-        WebSearchAgentTool(),
+        WebSearchAgentTool(config),
         WebFetchAgentTool(config),
         HTMLPraserAgentTool(config),
     ]
@@ -203,13 +285,9 @@ def build_default_tools(config: AgentConfig) -> list[Tools]:
 
 def get_tools() -> list[str]:
     return [
-        f"{tool_cls.name}: {tool_cls.description}"  # type: ignore[attr-defined]
-        for tool_cls in [
-            MemoryRecallAgentTool(),
-            MemoryWriteAgentTool(),
-            WebSearchAgentTool(),
-        ]
-    ] + [
+        f"memory_recall: {MemoryRecallAgentTool.description}",
+        f"memory_write: {MemoryWriteAgentTool.description}",
+        f"web_search: {WebSearchAgentTool.description}",
         f"web_fetch: {WebFetchAgentTool.description}",
         f"html_praser: {HTMLPraserAgentTool.description}",
     ]
