@@ -21,6 +21,10 @@ class Tools(ABC):
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
+    def schema(self) -> dict[str, Any]:
+        raise NotImplementedError
+
 
 class _HTMLTextExtractor(HTMLParser):
     def __init__(self) -> None:
@@ -116,6 +120,23 @@ class MemoryRecallAgentTool(Tools):
             "memory_count": len(matches),
         }
 
+    def schema(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "What memory to search for."},
+                        "limit": {"type": "integer", "description": "Maximum number of memories to return."},
+                    },
+                    "required": ["query"],
+                },
+            },
+        }
+
 
 class MemoryWriteAgentTool(Tools):
     description = "Write a note, preference, or outcome into local memory."
@@ -137,6 +158,28 @@ class MemoryWriteAgentTool(Tools):
             "ok": True,
             "tool": self.name,
             "memory": entry.to_dict(),
+        }
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "Memory text to store."},
+                        "kind": {"type": "string", "description": "Memory kind such as note or preference."},
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional tags for later recall.",
+                        },
+                    },
+                    "required": ["text"],
+                },
+            },
         }
 
 
@@ -239,6 +282,28 @@ class WebSearchAgentTool(Tools):
             response_payload["answer"] = answer.strip()[: self._config.max_excerpt_chars]
         return response_payload
 
+    def schema(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query."},
+                        "topic": {
+                            "type": "string",
+                            "enum": ["general", "news"],
+                            "description": "Whether the query is general web search or news-focused.",
+                        },
+                        "limit": {"type": "integer", "description": "Maximum number of results to return."},
+                    },
+                    "required": ["query"],
+                },
+            },
+        }
+
 
 class WebFetchAgentTool(Tools):
     description = "Fetch a web page and convert it into a readable excerpt."
@@ -277,6 +342,22 @@ class WebFetchAgentTool(Tools):
             "excerpt": excerpt,
         }
 
+    def schema(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "URL to fetch."},
+                    },
+                    "required": ["url"],
+                },
+            },
+        }
+
 
 class HTMLPraserAgentTool(Tools):
     description = "Parse raw HTML into plain text and simple metadata."
@@ -305,6 +386,22 @@ class HTMLPraserAgentTool(Tools):
             "link_count": len(parsed["links"]),
         }
 
+    def schema(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "html": {"type": "string", "description": "Raw HTML to parse."},
+                    },
+                    "required": ["html"],
+                },
+            },
+        }
+
 
 def build_default_tools(config: AgentConfig) -> list[Tools]:
     return [
@@ -326,6 +423,10 @@ def get_tools() -> list[str]:
     ]
 
 
+def build_ollama_tools(tools: list[Tools]) -> list[dict[str, Any]]:
+    return [tool.schema() for tool in tools]
+
+
 def format_tool_result(result: dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=True)
 
@@ -338,6 +439,7 @@ __all__ = [
     "WebFetchAgentTool",
     "HTMLPraserAgentTool",
     "build_default_tools",
+    "build_ollama_tools",
     "format_tool_result",
     "get_tools",
 ]

@@ -2,15 +2,37 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import json
+from dataclasses import dataclass, field
+from typing import Any, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from soul.config import AgentConfig
 
 
+class ChatMessage(TypedDict, total=False):
+    role: str
+    content: str
+    name: str
+    tool_calls: list[dict[str, Any]]
+
+
+@dataclass(slots=True)
+class ChatResponse:
+    content: str
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+
+
 class LLMProvider(ABC):
     @abstractmethod
-    def generate(self, *, model: str, system: str, prompt: str) -> str:
+    def chat(
+        self,
+        *,
+        model: str,
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+        format: str | None = None,
+    ) -> ChatResponse:
         raise NotImplementedError
 
 
@@ -18,16 +40,25 @@ class OllamaProvider(LLMProvider):
     def __init__(self, config: AgentConfig) -> None:
         self._config = config
 
-    def generate(self, *, model: str, system: str, prompt: str) -> str:
+    def chat(
+        self,
+        *,
+        model: str,
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+        format: str | None = None,
+    ) -> ChatResponse:
         payload = {
             "model": model,
-            "system": system,
-            "prompt": prompt,
+            "messages": messages,
             "stream": False,
-            "format": "json",
         }
+        if tools:
+            payload["tools"] = tools
+        if format:
+            payload["format"] = format
         request = Request(
-            f"{self._config.ollama_base_url}/api/generate",
+            f"{self._config.ollama_base_url}/api/chat",
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
@@ -49,10 +80,21 @@ class OllamaProvider(LLMProvider):
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"Invalid response from Ollama: {body[:500]}") from exc
 
-        response_text = parsed.get("response")
-        if not isinstance(response_text, str) or not response_text.strip():
-            raise RuntimeError(f"Ollama returned no text response: {body[:500]}")
-        return response_text.strip()
+        message = parsed.get("message", {})
+        if not isinstance(message, dict):
+            raise RuntimeError(f"Ollama returned no message payload: {body[:500]}")
+
+        response_text = message.get("content", "")
+        if not isinstance(response_text, str):
+            response_text = ""
+
+        tool_calls = message.get("tool_calls", [])
+        if not isinstance(tool_calls, list):
+            tool_calls = []
+
+        if not response_text.strip() and not tool_calls:
+            raise RuntimeError(f"Ollama returned neither text nor tool calls: {body[:500]}")
+        return ChatResponse(content=response_text.strip(), tool_calls=tool_calls)
 
 
 class LLMHandler:
@@ -64,8 +106,15 @@ class LLMHandler:
     def provider(self) -> LLMProvider:
         return self._provider
 
-    def generate(self, *, model: str, system: str, prompt: str) -> str:
-        return self._provider.generate(model=model, system=system, prompt=prompt)
+    def chat(
+        self,
+        *,
+        model: str,
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+        format: str | None = None,
+    ) -> ChatResponse:
+        return self._provider.chat(model=model, messages=messages, tools=tools, format=format)
 
 
-__all__ = ["LLMHandler", "LLMProvider", "OllamaProvider"]
+__all__ = ["ChatMessage", "ChatResponse", "LLMHandler", "LLMProvider", "OllamaProvider"]
