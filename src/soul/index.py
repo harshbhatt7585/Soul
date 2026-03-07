@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from soul.agent import SoulAgent
-from soul.cli import print_run_events, run_repl
+from soul.cli import run_repl
 from soul.config import load_agent_config
 
 
@@ -53,6 +53,5 @@ def main() -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print_run_events(result)
     print(result.reply)
     return 0

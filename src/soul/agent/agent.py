@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from email import message
 import json
 from typing import Any
 
@@ -11,9 +10,8 @@ from soul.agent.prompts import (
     build_tool_identification_prompt,
     verification_prompt,
 )
-from soul.agent.scratchpad import ScratchpadStore
 from soul.agent.tools import build_default_tools, build_ollama_tools
-from soul.agent.types import AgentEvent, RunResult
+from soul.agent.types import RunResult
 from soul.config import AgentConfig
 from soul.models.llm import ChatMessage, ChatResponse, LLMHandler, LLMProvider
 
@@ -41,7 +39,6 @@ def _extract_json(raw: str) -> dict[str, Any]:
 class Agent:
     def __init__(self, config: AgentConfig, llm_provider: LLMProvider | None = None) -> None:
         self._config = config
-        self._scratchpad = ScratchpadStore(config)
         self._llm_handler = LLMHandler(config, provider=llm_provider)
         tool_list = build_default_tools(config)
         self._tools = {tool.name: tool for tool in tool_list}
@@ -133,51 +130,39 @@ class Agent:
             results.append(tool(args))
         return results
 
-    def _record_event(self, events: list[AgentEvent], *, kind: str, title: str, detail: str) -> None:
-        event = AgentEvent(kind=kind, title=title, detail=detail)
-        events.append(event)
-        self._scratchpad.append(event)
-
     def _generate_response(
         self,
         *,
         model: str | None,
-        prompt: str,
-        plan_summary: str,
-        tool_summary: str,
         tool_messages: list[ChatMessage],
-        events: list[AgentEvent],
-        iteration: int,
     ) -> tuple[str, str]:
         final_reply = ""
         final_reasoning = ""
         for attempt in range(3):
+            response_messages = list(self.context)
+            if attempt > 0:
+                response_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "response_retry": attempt + 1,
+                                "reason": "previous response text was empty",
+                                "instruction": "Return JSON with a non-empty text field.",
+                            },
+                            ensure_ascii=True,
+                        ),
+                    }
+                )
             response = self._call_llm_json(
                 model=model,
-                prompt=build_respond_prompt(
-                    prompt,
-                    plan_summary=plan_summary,
-                    tool_summary=tool_summary,
-                    retry_count=attempt,
-                ),
+                prompt=build_respond_prompt(messages=response_messages),
                 extra_messages=tool_messages,
             )
             reply = str(response.get("text", "")).strip()
             reasoning = str(response.get("reasoning", "")).strip()
             final_reply = reply
             final_reasoning = reasoning
-            self._record_event(
-                events,
-                kind="response_attempt",
-                title=f"Iteration {iteration} Attempt {attempt + 1}",
-                detail=json.dumps(
-                    {
-                        "text": reply,
-                        "reasoning": reasoning,
-                    },
-                    ensure_ascii=True,
-                ),
-            )
             if reply:
                 return reply, reasoning
 
@@ -185,31 +170,32 @@ class Agent:
 
     def run(self, prompt: str, *, model: str | None = None) -> RunResult:
         self.context.append({"role": "user", "content": prompt})
-        events: list[AgentEvent] = []
-        verification_feedback = ""
 
         for iteration in range(1, self.max_iter + 1):
             plan = self._call_llm_json(
                 model=model,
-                prompt=build_planning_prompt(messages=self.context)
-,
+                prompt=build_planning_prompt(messages=self.context),
             )
+            plan_text = json.dumps(plan, ensure_ascii=True)
+            self.context.append({"role": "assistant", "content": plan_text})
+            todo = plan.get("todo", [])
+            if not isinstance(todo, list):
+                todo = []
 
-            self.context.append({"role": "assistant", "content": plan})
-            
             tool_identification = self._chat(
                 model=model,
-                prompt=build_tool_identification_prompt(messages=self.context)
+                prompt=build_tool_identification_prompt(messages=self.context),
                 tools=self._ollama_tools,
             )
-
-            self.context.append({"role": "assistant", "content": tool_identification})
-
             tool_calls = [self._normalize_tool_call(tool_call) for tool_call in tool_identification.tool_calls]
             tool_calls = [tool_call for tool_call in tool_calls if tool_call.get("name")]
+            tool_identification_text = tool_identification.content.strip() or json.dumps(
+                {"tool_calls": tool_calls},
+                ensure_ascii=True,
+            )
+            self.context.append({"role": "assistant", "content": tool_identification_text})
 
             tool_results = self._run_tool_calls(tool_calls)
-            tool_summary = json.dumps(tool_results, ensure_ascii=True) if tool_results else ""
             tool_messages: list[ChatMessage] = []
             if tool_identification.tool_calls:
                 tool_messages.append(
@@ -229,38 +215,41 @@ class Agent:
                             "content": json.dumps(result, ensure_ascii=True),
                         }
                     )
-            
-            reply = self._chat(
+
+            reply, response_reasoning = self._generate_response(
                 model=model,
-                prompt=build_respond_prompt(messages=self.context),
-                extra_messages=tool_messages,
+                tool_messages=tool_messages,
             )
-            self.context.append({"role": "assistant", "content": reply})
+            if reply:
+                self.context.append({"role": "assistant", "content": reply})
+            del response_reasoning
 
-
+            verification_messages = list(self.context)
+            verification_messages.append(
+                {
+                    "role": "assistant",
+                    "content": json.dumps({"candidate_answer": reply}, ensure_ascii=True),
+                }
+            )
             verification = self._call_llm_json(
                 model=model,
-                prompt=verification_prompt(
-                    prompt,
-                    candidate_answer="",
-                ),
+                prompt=verification_prompt(messages=verification_messages),
                 extra_messages=tool_messages,
             )
-
+            self.context.append({"role": "assistant", "content": json.dumps(verification, ensure_ascii=True)})
             verification_feedback = str(verification.get("feedback", "")).strip()
             ok = bool(verification.get("ok")) and not verification_feedback
 
             if ok or iteration == self.max_iter:
                 return RunResult(
                     reply=reply or "I could not produce a final response.",
-                    events=events,
                     iterations=iteration,
+                    meta={"todo": todo},
                 )
 
-        return RunResult(reply="I could not complete the request.", events=events, iterations=self.max_iter)
+        return RunResult(reply="I could not complete the request.", iterations=self.max_iter)
 
     def reset(self) -> None:
-        self._scratchpad.reset()
         self.context = []
 
 
