@@ -130,44 +130,6 @@ class Agent:
             results.append(tool(args))
         return results
 
-    def _generate_response(
-        self,
-        *,
-        model: str | None,
-        tool_messages: list[ChatMessage],
-    ) -> tuple[str, str]:
-        final_reply = ""
-        final_reasoning = ""
-        for attempt in range(3):
-            response_messages = list(self.context)
-            if attempt > 0:
-                response_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": json.dumps(
-                            {
-                                "response_retry": attempt + 1,
-                                "reason": "previous response text was empty",
-                                "instruction": "Return JSON with a non-empty text field.",
-                            },
-                            ensure_ascii=True,
-                        ),
-                    }
-                )
-            response = self._call_llm_json(
-                model=model,
-                prompt=build_respond_prompt(messages=response_messages),
-                extra_messages=tool_messages,
-            )
-            reply = str(response.get("text", "")).strip()
-            reasoning = str(response.get("reasoning", "")).strip()
-            final_reply = reply
-            final_reasoning = reasoning
-            if reply:
-                return reply, reasoning
-
-        return final_reply, final_reasoning
-
     def run(self, prompt: str, *, model: str | None = None) -> RunResult:
         self.context.append({"role": "user", "content": prompt})
 
@@ -216,10 +178,13 @@ class Agent:
                         }
                     )
 
-            reply, response_reasoning = self._generate_response(
+            response = self._call_llm_json(
                 model=model,
-                tool_messages=tool_messages,
+                prompt=build_respond_prompt(messages=self.context),
+                extra_messages=tool_messages,
             )
+            reply = str(response.get("text", "")).strip()
+            response_reasoning = str(response.get("reasoning", "")).strip()
             if reply:
                 self.context.append({"role": "assistant", "content": reply})
             del response_reasoning
