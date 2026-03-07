@@ -14,6 +14,7 @@ from soul.agent.tools import build_default_tools, build_ollama_tools
 from soul.agent.types import RunResult
 from soul.config import AgentConfig
 from soul.models.llm import ChatMessage, ChatResponse, LLMHandler, LLMProvider
+from soul.utils import is_valid_plan, is_valid_response, is_valid_verification
 
 
 def _extract_json(raw: str) -> dict[str, Any]:
@@ -138,6 +139,21 @@ class Agent:
                 model=model,
                 prompt=build_planning_prompt(messages=self.context),
             )
+            print("Plan", plan)
+            if not is_valid_plan(plan):
+                self.context.append(
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "planner_error": "invalid plan payload",
+                                "payload": plan,
+                            },
+                            ensure_ascii=True,
+                        ),
+                    }
+                )
+                continue
             plan_text = json.dumps(plan, ensure_ascii=True)
             self.context.append({"role": "assistant", "content": plan_text})
             todo = plan.get("todo", [])
@@ -149,6 +165,7 @@ class Agent:
                 prompt=build_tool_identification_prompt(messages=self.context),
                 tools=self._ollama_tools,
             )
+            print("tool iden", tool_identification)
             tool_calls = [self._normalize_tool_call(tool_call) for tool_call in tool_identification.tool_calls]
             tool_calls = [tool_call for tool_call in tool_calls if tool_call.get("name")]
             tool_identification_text = tool_identification.content.strip() or json.dumps(
@@ -158,6 +175,7 @@ class Agent:
             self.context.append({"role": "assistant", "content": tool_identification_text})
 
             tool_results = self._run_tool_calls(tool_calls)
+            print("tool results", tool_results)
             tool_messages: list[ChatMessage] = []
             if tool_identification.tool_calls:
                 tool_messages.append(
@@ -183,6 +201,21 @@ class Agent:
                 prompt=build_respond_prompt(messages=self.context),
                 extra_messages=tool_messages,
             )
+            print("res", response)
+            if not is_valid_response(response):
+                self.context.append(
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "response_error": "invalid response payload",
+                                "payload": response,
+                            },
+                            ensure_ascii=True,
+                        ),
+                    }
+                )
+                continue
             reply = str(response.get("text", "")).strip()
             response_reasoning = str(response.get("reasoning", "")).strip()
             if reply:
@@ -201,6 +234,20 @@ class Agent:
                 prompt=verification_prompt(messages=verification_messages),
                 extra_messages=tool_messages,
             )
+            if not is_valid_verification(verification):
+                self.context.append(
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "verification_error": "invalid verification payload",
+                                "payload": verification,
+                            },
+                            ensure_ascii=True,
+                        ),
+                    }
+                )
+                continue
             self.context.append({"role": "assistant", "content": json.dumps(verification, ensure_ascii=True)})
             verification_feedback = str(verification.get("feedback", "")).strip()
             ok = bool(verification.get("ok")) and not verification_feedback
