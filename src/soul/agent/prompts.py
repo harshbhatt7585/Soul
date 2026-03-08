@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from email import message
 import json
 from typing import Any
 
@@ -54,37 +55,33 @@ def _json_block(schema: dict[str, Any]) -> str:
     return json.dumps(schema, indent=2)
 
 
-def _messages_block(messages: list[dict[str, Any]]) -> str:
-    return json.dumps(messages, ensure_ascii=True)
-
-
 def build_planning_prompt(*, messages: list[dict[str, Any]]) -> str:
-    return "\n".join(
-        [
-            "Plan the next agent step.",
-            f"Messages: {_messages_block(messages)}",
-            "Think step by step before answering.",
-            "Reason through the latest user request, the available context, and whether tools are needed.",
-            "If the user message is a simple acknowledgement, greeting, or sign-off, prefer a direct response with no tools.",
-            "Keep the plan focused on what is still missing.",
-            "Return JSON only.",
-            "The plan should be simple and actionable.",
-            _json_block(
-                {
-                    "todo": ["respond directly or gather missing information"],
-                    "reasoning": "step-by-step planning rationale",
-                    "notes": "short planning note",
-                }
-            ),
-        ]
+    return messages.append(
+            "\n".join(
+            [
+                "Plan the next agent step.",
+                "Think step by step before answering.",
+                "Reason through the latest user request, the available context, and whether tools are needed.",
+                "If the user message is a simple acknowledgement, greeting, or sign-off, prefer a direct response with no tools.",
+                "Keep the plan focused on what is still missing.",
+                "Return JSON only.",
+                "The plan should be simple and actionable.",
+                _json_block(
+                    {
+                        "todo": ["respond directly or gather missing information"],
+                        "reasoning": "step-by-step planning rationale",
+                        "notes": "short planning note",
+                    }
+                ),
+            ]
+        )
     )
 
 
 def build_tool_identification_prompt(*, messages: list[dict[str, Any]]) -> str:
-    return "\n".join(
+    return messages.append("\n".join(
         [
             "Identify which tools, if any, should be called next.",
-            f"Messages: {_messages_block(messages)}",
             "Think step by step before answering.",
             "Use tools only when the answer cannot be completed reliably from the current conversation.",
             "If the user message is a simple acknowledgement, greeting, or sign-off, call no tools.",
@@ -93,14 +90,15 @@ def build_tool_identification_prompt(*, messages: list[dict[str, Any]]) -> str:
             "If a tool previously failed and retrying without new information will not help, call no tools.",
             "When you decide no tools are needed, answer with normal text and do not invent tool calls.",
         ]
+        )
     )
 
 
 def verification_prompt(*, messages: list[dict[str, Any]]) -> str:
-    return "\n".join(
+    return messages.append(
+            "\n".join(
         [
             "Verify whether the current context is sufficient to answer the user.",
-            f"Messages: {_messages_block(messages)}",
             "Think step by step before answering.",
             "Explain to yourself whether the answer fully satisfies the user and what is still missing if not.",
             "If the answer may depend on saved preferences or prior facts and memory was not checked, treat that as potentially incomplete.",
@@ -115,13 +113,14 @@ def verification_prompt(*, messages: list[dict[str, Any]]) -> str:
             ),
         ]
     )
+    )
 
 
 def build_respond_prompt(*, messages: list[dict[str, Any]]) -> str:
-    return "\n".join(
+    return messages.append(
+        "\n".join(
         [
             "Write the final response to the user using the available context.",
-            f"Messages: {_messages_block(messages)}",
             "Think step by step before answering.",
             "Use the reasoning to produce the best concise final response.",
             "If memory results were returned, use only the relevant confirmed memories.",
@@ -134,3 +133,4 @@ def build_respond_prompt(*, messages: list[dict[str, Any]]) -> str:
             ),
         ]
     )
+    ) 
