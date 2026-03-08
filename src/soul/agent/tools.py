@@ -415,8 +415,8 @@ def build_default_tools(config: AgentConfig) -> list[Tools]:
 
 def get_tools() -> list[str]:
     return [
-        f"memory_recall: {MemoryRecallAgentTool.description}",
-        f"memory_write: {MemoryWriteAgentTool.description}",
+        # f"memory_recall: {MemoryRecallAgentTool.description}",
+        # f"memory_write: {MemoryWriteAgentTool.description}",
         f"web_search: {WebSearchAgentTool.description}",
         f"web_fetch: {WebFetchAgentTool.description}",
         f"html_praser: {HTMLPraserAgentTool.description}",
@@ -433,13 +433,13 @@ def format_tool_result(result: dict[str, Any]) -> str:
 
 __all__ = [
     "Tools",
-    # "MemoryRecallAgentTool",
-    # "MemoryWriteAgentTool",
+    "MemoryRecallAgentTool",
+    "MemoryWriteAgentTool",
     "WebSearchAgentTool",
     "WebFetchAgentTool",
     "HTMLPraserAgentTool",
-    # "build_default_tools",
-    # "build_ollama_tools",
-    # "format_tool_result",
-    # "get_tools",
+    "build_default_tools",
+    "build_ollama_tools",
+    "format_tool_result",
+    "get_tools",
 ]
