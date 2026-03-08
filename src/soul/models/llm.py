@@ -51,6 +51,7 @@ class LLMProvider(ABC):
         format: str | None = None,
         stream: bool = False,
         on_chunk: Callable[[str], None] | None = None,
+        on_reasoning_chunk: Callable[[str], None] | None = None,
     ) -> ChatResponse:
         raise NotImplementedError
 
@@ -68,6 +69,7 @@ class OllamaProvider(LLMProvider):
         format: str | None = None,
         stream: bool = False,
         on_chunk: Callable[[str], None] | None = None,
+        on_reasoning_chunk: Callable[[str], None] | None = None,
     ) -> ChatResponse:
         payload = {
             "model": model,
@@ -90,7 +92,11 @@ class OllamaProvider(LLMProvider):
         try:
             with urlopen(request, timeout=self._config.request_timeout_seconds) as response:
                 if stream:
-                    return self._read_streaming_response(response, on_chunk=on_chunk)
+                    return self._read_streaming_response(
+                        response,
+                        on_chunk=on_chunk,
+                        on_reasoning_chunk=on_reasoning_chunk,
+                    )
                 body = response.read().decode("utf-8")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -133,6 +139,7 @@ class OllamaProvider(LLMProvider):
         response: Any,
         *,
         on_chunk: Callable[[str], None] | None,
+        on_reasoning_chunk: Callable[[str], None] | None,
     ) -> ChatResponse:
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -163,6 +170,8 @@ class OllamaProvider(LLMProvider):
             reasoning = message.get("thinking", message.get("reasoning_content", ""))
             if isinstance(reasoning, str) and reasoning:
                 reasoning_parts.append(reasoning)
+                if on_reasoning_chunk is not None:
+                    on_reasoning_chunk(reasoning)
 
             raw_tool_calls = message.get("tool_calls", [])
             if isinstance(raw_tool_calls, list) and raw_tool_calls:
@@ -195,6 +204,7 @@ class LLMHandler:
         format: str | None = None,
         stream: bool = False,
         on_chunk: Callable[[str], None] | None = None,
+        on_reasoning_chunk: Callable[[str], None] | None = None,
     ) -> ChatResponse:
         return self._provider.chat(
             model=model,
@@ -203,6 +213,7 @@ class LLMHandler:
             format=format,
             stream=stream,
             on_chunk=on_chunk,
+            on_reasoning_chunk=on_reasoning_chunk,
         )
 
 

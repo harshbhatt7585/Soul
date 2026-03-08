@@ -24,9 +24,32 @@ agent = Agent(
     config=agent_config
 )
 
-response = agent.run("hello", stream=True, on_chunk=lambda chunk: print(chunk, end="", flush=True))
+printed_reasoning_header = False
+printed_content_header = False
+
+
+def _print_reasoning(chunk: str) -> None:
+    global printed_reasoning_header
+    if not printed_reasoning_header:
+        print("reasoning:")
+        printed_reasoning_header = True
+    print(chunk, end="", flush=True)
+
+
+def _print_content(chunk: str) -> None:
+    global printed_content_header
+    if not printed_content_header:
+        if printed_reasoning_header:
+            print()
+        print("content:")
+        printed_content_header = True
+    print(chunk, end="", flush=True)
+
+
+response = agent.run(
+    "hello",
+    stream=True,
+    on_chunk=_print_content,
+    on_reasoning_chunk=_print_reasoning,
+)
 print()
-reasoning = response.meta.get("reasoning", "")
-if reasoning:
-    print("reasoning:")
-    print(reasoning)

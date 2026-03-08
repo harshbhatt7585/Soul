@@ -71,6 +71,7 @@ class Agent:
         format: str | None = None,
         stream: bool = False,
         on_chunk: Callable[[str], None] | None = None,
+        on_reasoning_chunk: Callable[[str], None] | None = None,
     ) -> ChatResponse:
         messages = list(self.context)
         if extra_messages:
@@ -82,6 +83,7 @@ class Agent:
             format=format,
             stream=stream,
             on_chunk=on_chunk,
+            on_reasoning_chunk=on_reasoning_chunk,
         )
 
     def run(
@@ -91,6 +93,7 @@ class Agent:
         model: str | None = None,
         stream: bool = False,
         on_chunk: Callable[[str], None] | None = None,
+        on_reasoning_chunk: Callable[[str], None] | None = None,
     ) -> RunResult:
         plan_prompt = build_planning_prompt(prompt=prompt)
         response = self._chat(
@@ -99,6 +102,7 @@ class Agent:
             format="json",
             stream=stream,
             on_chunk=on_chunk,
+            on_reasoning_chunk=on_reasoning_chunk,
         )
 
         return RunResult(
