@@ -165,13 +165,13 @@ class Agent:
                 prompt=build_tool_identification_prompt(messages=self.context),
                 tools=self._ollama_tools,
             )
-            print("tool iden", tool_identification)
             tool_calls = [self._normalize_tool_call(tool_call) for tool_call in tool_identification.tool_calls]
             tool_calls = [tool_call for tool_call in tool_calls if tool_call.get("name")]
             tool_identification_text = tool_identification.content.strip() or json.dumps(
                 {"tool_calls": tool_calls},
                 ensure_ascii=True,
             )
+            print("TOOL IDENTIFUCATION:", tool_identification_text)
             self.context.append({"role": "assistant", "content": tool_identification_text})
 
             tool_results = self._run_tool_calls(tool_calls)
@@ -201,7 +201,7 @@ class Agent:
                 prompt=build_respond_prompt(messages=self.context),
                 extra_messages=tool_messages,
             )
-            print("res", response)
+            print("RESPONSE:", response)
             if not is_valid_response(response):
                 self.context.append(
                     {
@@ -234,6 +234,7 @@ class Agent:
                 prompt=verification_prompt(messages=verification_messages),
                 extra_messages=tool_messages,
             )
+            print("VERIFICATION: ", verification)
             if not is_valid_verification(verification):
                 self.context.append(
                     {
