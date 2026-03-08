@@ -139,9 +139,14 @@ class Agent:
             on_reasoning_chunk=on_reasoning_chunk,
         )
         tools_to_call = tool_payload.get("tool_calls", [])
+
+        print("\n\nTOOLS TO CALL", tools_to_call)
+
         if not isinstance(tools_to_call, list):
             tools_to_call = []
         tools_output = self._call_tools(tools_to_call)
+
+        print("\n\nTOOLS OUTPUT", tools_output)
 
         response_prompt = build_respond_prompt(prompt=prompt, tools_output=json.dumps(tools_output))
         final_response, final_payload = self._chat_json(
