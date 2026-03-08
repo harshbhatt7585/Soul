@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from email import message
 import json
 from typing import Any
 
@@ -54,8 +53,8 @@ def build_system_prompt(
 def _json_block(schema: dict[str, Any]) -> str:
     return json.dumps(schema, indent=2)
 
-def build_planning_prompt(*, messages: list[dict[str, Any]]) -> None:
-    content = "\n".join(
+def build_planning_prompt(*, messages: list[dict[str, Any]]) -> str:
+    return "\n".join(
         [
             "Plan the next agent step.",
             "Think step by step before answering.",
@@ -73,11 +72,10 @@ def build_planning_prompt(*, messages: list[dict[str, Any]]) -> None:
             ),
         ]
     )
-    messages.append({'role': 'system', 'content': content})
 
 
-def build_tool_identification_prompt(*, messages: list[dict[str, Any]]) -> None:
-    content = "\n".join(
+def build_tool_identification_prompt(*, messages: list[dict[str, Any]]) -> str:
+    return "\n".join(
         [
             "Identify which tools, if any, should be called next.",
             "Think step by step before answering.",
@@ -89,11 +87,10 @@ def build_tool_identification_prompt(*, messages: list[dict[str, Any]]) -> None:
             "When you decide no tools are needed, answer with normal text and do not invent tool calls.",
         ]
     )
-    messages.append({'role': 'system', 'content': content})
 
 
-def verification_prompt(*, messages: list[dict[str, Any]]) -> None:
-    content = "\n".join(
+def verification_prompt(*, messages: list[dict[str, Any]]) -> str:
+    return "\n".join(
         [
             "Verify whether the current context is sufficient to answer the user.",
             "Think step by step before answering.",
@@ -110,11 +107,10 @@ def verification_prompt(*, messages: list[dict[str, Any]]) -> None:
             ),
         ]
     )
-    messages.append({'role': 'system', 'content': content})
 
 
-def build_respond_prompt(*, messages: list[dict[str, Any]]) -> None:
-    content = "\n".join(
+def build_respond_prompt(*, messages: list[dict[str, Any]]) -> str:
+    return "\n".join(
         [
             "Write the final response to the user using the available context.",
             "Think step by step before answering.",
@@ -129,5 +125,3 @@ def build_respond_prompt(*, messages: list[dict[str, Any]]) -> None:
             ),
         ]
     )
-    messages.append({'role': 'system', 'content': content})
-

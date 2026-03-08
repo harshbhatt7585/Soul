@@ -44,16 +44,21 @@ class Agent:
         tool_list = build_default_tools(config)
         self._tools = {tool.name: tool for tool in tool_list}
         self._ollama_tools = build_ollama_tools(tool_list)
-        self.context: list[dict[str, Any]] = [
-            build_system_prompt(
-            self._config,
-            name="Soul",
-            tools=[f"{name}: {tool.description}" for name, tool in self._tools.items()],
-        )
-
-        ]
+        self.context: list[dict[str, Any]] = []
         self.max_iter = 3
 
+    def _conversation_to_messages(self, system_prompt: str, prompt: str) -> list[ChatMessage]:
+        messages: list[ChatMessage] = [{"role": "system", "content": system_prompt}]
+        for entry in self.context:
+            if not isinstance(entry, dict):
+                continue
+            role = str(entry.get("role", "")).strip().lower()
+            content = str(entry.get("content", ""))
+            if role not in {"user", "assistant"}:
+                continue
+            messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": prompt})
+        return messages
 
     def _chat(
         self,
@@ -64,10 +69,17 @@ class Agent:
         extra_messages: list[ChatMessage] | None = None,
         format: str | None = None,
     ) -> ChatResponse:
-
+        system_prompt = build_system_prompt(
+            self._config,
+            name="Soul",
+            tools=[f"{name}: {tool.description}" for name, tool in self._tools.items()],
+        )
+        messages = self._conversation_to_messages(system_prompt, prompt)
+        if extra_messages:
+            messages[-1:-1] = extra_messages
         return self._llm_handler.chat(
             model=model or self._config.manual_model,
-            messages=self.context,
+            messages=messages,
             tools=tools,
             format=format,
         )
