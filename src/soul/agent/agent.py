@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Callable
 
-from soul.agent.prompts import build_planning_prompt, build_respond_prompt, build_system_prompt, verification_prompt
-from soul.agent.scratchpad import ScratchpadStore
+from soul.agent.prompts import (
+    build_planning_prompt,
+    build_respond_prompt,
+    build_system_prompt,
+    build_tool_calling_prompt,
+)
 from soul.agent.tools import build_default_tools
-from soul.agent.types import AgentEvent, RunResult
-from soul.config import AgentConfig
-from soul.models.llm import LLMHandler, LLMProvider
+from soul.agent.types import RunResult
+from soul.config import AgentConfig, model_for_mode
+from soul.models.llm import ChatMessage, ChatResponse, LLMHandler, LLMProvider
 
 
 def _extract_json(raw: str) -> dict[str, Any]:
@@ -34,133 +38,143 @@ def _extract_json(raw: str) -> dict[str, Any]:
 class Agent:
     def __init__(self, config: AgentConfig, llm_provider: LLMProvider | None = None) -> None:
         self._config = config
-        self._scratchpad = ScratchpadStore(config)
         self._llm_handler = LLMHandler(config, provider=llm_provider)
-        self._tools = {tool.name: tool for tool in build_default_tools(config)}
-        self.context: list[dict[str, Any]] = []
-        self.max_iter = 3
+        tool_list = build_default_tools(config)
+        self._tools = {tool.name: tool for tool in tool_list}
+        self.context: list[dict[str, Any]] = [
+            {
+                "role": "system",
+                "content": build_system_prompt(config, name="Soul"),
+            }
+        ]
 
-    def _call_llm(self, *, model: str | None, prompt: str) -> dict[str, Any]:
-        system_prompt = build_system_prompt(
-            self._config,
-            name="Soul",
-            tools=[f"{name}: {tool.description}" for name, tool in self._tools.items()],
-        )
-        raw = self._llm_handler.generate(
-            model=model or self._config.manual_model,
-            system=system_prompt,
-            prompt=prompt,
-        )
-        return _extract_json(raw)
-
-    def _run_tool_calls(self, tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        results: list[dict[str, Any]] = []
-        for tool_call in tool_calls:
-            name = str(tool_call.get("name", "")).strip()
-            args = tool_call.get("args", {})
-            if not isinstance(args, dict):
-                args = {}
-
-            tool = self._tools.get(name)
-            if tool is None:
-                results.append({"ok": False, "tool": name, "error": "unknown tool"})
+    def _call_tools(self, tools_to_call: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        tools_response: list[dict[str, Any]] = []
+        for tool_call in tools_to_call:
+            if not isinstance(tool_call, dict):
                 continue
+            tool_name = str(tool_call.get("name", "")).strip()
+            tool_args = tool_call.get("args", {})
+            if not isinstance(tool_args, dict):
+                tool_args = {}
+            tool = self._tools.get(tool_name)
+            if tool is None:
+                tools_response.append({"ok": False, "tool": tool_name, "error": "unknown tool"})
+                continue
+            tools_response.append(tool(tool_args))
+        return tools_response
 
-            results.append(tool(args))
-        return results
+    def _chat(
+        self,
+        *,
+        model: str | None,
+        prompt: str,
+        extra_messages: list[ChatMessage] | None = None,
+        format: str | None = None,
+        stream: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
+        on_reasoning_chunk: Callable[[str], None] | None = None,
+    ) -> ChatResponse:
+        messages = list(self.context)
+        if extra_messages:
+            messages.extend(extra_messages)
+        messages.append({"role": "user", "content": prompt})
+        return self._llm_handler.chat(
+            messages=messages,
+            model=model_for_mode(self._config, "default", override=model),
+            format=format,
+            stream=stream,
+            on_chunk=on_chunk,
+            on_reasoning_chunk=on_reasoning_chunk,
+        )
 
-    def run(self, prompt: str, *, model: str | None = None) -> RunResult:
-        self.context.append({"role": "user", "content": prompt})
-        events: list[AgentEvent] = []
-        verification_feedback = ""
+    def _chat_json(
+        self,
+        *,
+        model: str | None,
+        prompt: str,
+        extra_messages: list[ChatMessage] | None = None,
+        stream: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
+        on_reasoning_chunk: Callable[[str], None] | None = None,
+    ) -> tuple[ChatResponse, dict[str, Any]]:
+        response = self._chat(
+            model=model,
+            prompt=prompt,
+            extra_messages=extra_messages,
+            format="json",
+            stream=stream,
+            on_chunk=on_chunk,
+            on_reasoning_chunk=on_reasoning_chunk,
+        )
+        return response, _extract_json(response.content)
 
-        for iteration in range(1, self.max_iter + 1):
-            planning_input = prompt
-            if verification_feedback:
-                planning_input = f"{prompt}\nPrevious verification feedback: {verification_feedback}"
+    def run(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        stream: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
+        on_reasoning_chunk: Callable[[str], None] | None = None,
+    ) -> RunResult:
+        plan_prompt = build_planning_prompt(prompt=prompt)
+        plan_response, plan_payload = self._chat_json(
+            model=model,
+            prompt=plan_prompt,
+            stream=stream,
+            on_chunk=on_chunk,
+            on_reasoning_chunk=on_reasoning_chunk,
+        )
+        planned_tool_calls = plan_payload.get("tool_calls", [])
+        if not isinstance(planned_tool_calls, list):
+            planned_tool_calls = []
 
-            plan = self._call_llm(
-                model=model,
-                prompt=build_planning_prompt(planning_input, self.context),
-            )
-            print("Plan", plan)
-            todo = plan.get("todo", [])
-            tool_calls = plan.get("tool_calls", [])
+        tool_calling_prompt = build_tool_calling_prompt(prompt=prompt, tools_calls=planned_tool_calls)
+        tool_response, tool_payload = self._chat_json(
+            model=model,
+            prompt=tool_calling_prompt,
+            stream=stream,
+            on_chunk=on_chunk,
+            on_reasoning_chunk=on_reasoning_chunk,
+        )
+        tools_to_call = tool_payload.get("tool_calls", [])
+        if not isinstance(tools_to_call, list):
+            tools_to_call = []
+        tools_output = self._call_tools(tools_to_call)
 
+        response_prompt = build_respond_prompt(prompt=prompt, tools_output=json.dumps(tools_output))
+        final_response, final_payload = self._chat_json(
+            model=model,
+            prompt=response_prompt,
+            stream=stream,
+            on_chunk=on_chunk,
+            on_reasoning_chunk=on_reasoning_chunk,
+        )
+        reply = str(final_payload.get("text", final_response.content)).strip()
+        if not reply:
+            reply = final_response.content.strip()
 
-            if not isinstance(todo, list):
-                todo = []
-            if not isinstance(tool_calls, list):
-                tool_calls = []
-
-            self.context.append(
-                {
-                    "role": "planner",
-                    "content": {
-                        "todo": todo,
-                        "tool_calls": tool_calls,
-                        "notes": plan.get("notes", ""),
-                    },
-                }
-            )
-            events.append(
-                AgentEvent(
-                    kind="planning",
-                    title=f"Iteration {iteration}",
-                    detail=f"todo={json.dumps(todo, ensure_ascii=True)}",
-                )
-            )
-
-            tool_results = self._run_tool_calls(tool_calls)
-
-            print(tool_results)
-
-            if tool_results:
-                self.context.append({"role": "tools", "content": tool_results})
-                events.append(
-                    AgentEvent(
-                        kind="tool_execution",
-                        title=f"Iteration {iteration}",
-                        detail=json.dumps(tool_results, ensure_ascii=True),
-                    )
-                )
-
-            verification = self._call_llm(
-                model=model,
-                prompt=verification_prompt(prompt, self.context),
-            )
-            ok = bool(verification.get("ok"))
-            verification_feedback = str(verification.get("feedback", "")).strip()
-            self.context.append({"role": "verifier", "content": verification})
-            events.append(
-                AgentEvent(
-                    kind="verification",
-                    title=f"Iteration {iteration}",
-                    detail=json.dumps(verification, ensure_ascii=True),
-                )
-            )
-
-            response = self._call_llm(
-                model=model,
-                prompt=build_respond_prompt(prompt, self.context),
-            )
-            reply = str(response.get("text", "")).strip()
-            if reply:
-                self.context.append({"role": "assistant", "content": reply})
-
-            if ok or iteration == self.max_iter:
-                return RunResult(
-                    reply=reply or "I could not produce a final response.",
-                    events=events,
-                    iterations=iteration,
-                    meta={"todo": todo},
-                )
-
-        return RunResult(reply="I could not complete the request.", events=events, iterations=self.max_iter)
+        return RunResult(
+            reply=reply,
+            iterations=1,
+            meta={
+                "planning_reasoning": plan_response.reasoning,
+                "planned_tool_calls": planned_tool_calls,
+                "tool_calling_reasoning": tool_response.reasoning,
+                "tool_calls": tools_to_call,
+                "tools_output": tools_output,
+                "response_reasoning": final_response.reasoning,
+            },
+        )
 
     def reset(self) -> None:
-        self._scratchpad.reset()
-        self.context = []
+        self.context = [
+            {
+                "role": "system",
+                "content": build_system_prompt(self._config, name="Soul"),
+            }
+        ]
 
 
 SoulAgent = Agent

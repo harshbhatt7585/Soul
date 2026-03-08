@@ -7,6 +7,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from soul.agent.memory import MemoryStore
 from soul.config import AgentConfig
 
 
@@ -18,6 +19,10 @@ class Tools(ABC):
 
     @abstractmethod
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def schema(self) -> dict[str, Any]:
         raise NotImplementedError
 
 
@@ -90,21 +95,92 @@ class _HTMLMetadataParser(HTMLParser):
 class MemoryRecallAgentTool(Tools):
     description = "Recall relevant memory entries for the current prompt."
 
-    def __init__(self) -> None:
+    def __init__(self, config: AgentConfig) -> None:
         super().__init__("memory_recall")
+        self._config = config
+        self._store = MemoryStore(config)
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"ok": False, "tool": self.name, "error": "memory recall is not implemented yet"}
+        query = str(args.get("query", "")).strip()
+        if not query:
+            return {"ok": False, "tool": self.name, "error": "missing query"}
+
+        limit = args.get("limit", self._config.search_limit)
+        try:
+            max_results = max(1, min(int(limit), self._config.search_limit))
+        except (TypeError, ValueError):
+            max_results = self._config.search_limit
+
+        matches = self._store.search(query=query, limit=max_results)
+        return {
+            "ok": True,
+            "tool": self.name,
+            "query": query,
+            "memories": [entry.to_dict() for entry in matches],
+            "memory_count": len(matches),
+        }
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "What memory to search for."},
+                        "limit": {"type": "integer", "description": "Maximum number of memories to return."},
+                    },
+                    "required": ["query"],
+                },
+            },
+        }
 
 
 class MemoryWriteAgentTool(Tools):
     description = "Write a note, preference, or outcome into local memory."
 
-    def __init__(self) -> None:
+    def __init__(self, config: AgentConfig) -> None:
         super().__init__("memory_write")
+        self._store = MemoryStore(config)
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"ok": False, "tool": self.name, "error": "memory write is not implemented yet"}
+        text = str(args.get("text", "")).strip()
+        if not text:
+            return {"ok": False, "tool": self.name, "error": "missing text"}
+
+        kind = str(args.get("kind", "note")).strip().lower() or "note"
+        raw_tags = args.get("tags", [])
+        tags = [str(tag).strip().lower() for tag in raw_tags if str(tag).strip()] if isinstance(raw_tags, list) else []
+        entry = self._store.append(text=text, kind=kind, tags=tags)
+        return {
+            "ok": True,
+            "tool": self.name,
+            "memory": entry.to_dict(),
+        }
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "Memory text to store."},
+                        "kind": {"type": "string", "description": "Memory kind such as note or preference."},
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional tags for later recall.",
+                        },
+                    },
+                    "required": ["text"],
+                },
+            },
+        }
 
 
 class WebSearchAgentTool(Tools):
@@ -206,6 +282,28 @@ class WebSearchAgentTool(Tools):
             response_payload["answer"] = answer.strip()[: self._config.max_excerpt_chars]
         return response_payload
 
+    def schema(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query."},
+                        "topic": {
+                            "type": "string",
+                            "enum": ["general", "news"],
+                            "description": "Whether the query is general web search or news-focused.",
+                        },
+                        "limit": {"type": "integer", "description": "Maximum number of results to return."},
+                    },
+                    "required": ["query"],
+                },
+            },
+        }
+
 
 class WebFetchAgentTool(Tools):
     description = "Fetch a web page and convert it into a readable excerpt."
@@ -244,6 +342,22 @@ class WebFetchAgentTool(Tools):
             "excerpt": excerpt,
         }
 
+    def schema(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "URL to fetch."},
+                    },
+                    "required": ["url"],
+                },
+            },
+        }
+
 
 class HTMLPraserAgentTool(Tools):
     description = "Parse raw HTML into plain text and simple metadata."
@@ -272,11 +386,25 @@ class HTMLPraserAgentTool(Tools):
             "link_count": len(parsed["links"]),
         }
 
+    def schema(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "html": {"type": "string", "description": "Raw HTML to parse."},
+                    },
+                    "required": ["html"],
+                },
+            },
+        }
+
 
 def build_default_tools(config: AgentConfig) -> list[Tools]:
     return [
-        MemoryRecallAgentTool(),
-        MemoryWriteAgentTool(),
         WebSearchAgentTool(config),
         WebFetchAgentTool(config),
         HTMLPraserAgentTool(config),
@@ -285,12 +413,16 @@ def build_default_tools(config: AgentConfig) -> list[Tools]:
 
 def get_tools() -> list[str]:
     return [
-        f"memory_recall: {MemoryRecallAgentTool.description}",
-        f"memory_write: {MemoryWriteAgentTool.description}",
+        # f"memory_recall: {MemoryRecallAgentTool.description}",
+        # f"memory_write: {MemoryWriteAgentTool.description}",
         f"web_search: {WebSearchAgentTool.description}",
         f"web_fetch: {WebFetchAgentTool.description}",
         f"html_praser: {HTMLPraserAgentTool.description}",
     ]
+
+
+def build_ollama_tools(tools: list[Tools]) -> list[dict[str, Any]]:
+    return [tool.schema() for tool in tools]
 
 
 def format_tool_result(result: dict[str, Any]) -> str:
@@ -305,6 +437,7 @@ __all__ = [
     "WebFetchAgentTool",
     "HTMLPraserAgentTool",
     "build_default_tools",
+    "build_ollama_tools",
     "format_tool_result",
     "get_tools",
 ]
