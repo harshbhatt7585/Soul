@@ -45,6 +45,8 @@ class AgentConfig:
     soul_home: Path
     scratchpad_path: Path
     memory_path: Path
+    daily_memory_dir: Path
+    memory_index_path: Path
     soul_path: Path
     ollama_base_url: str
     ollama_keep_alive: str
@@ -81,7 +83,9 @@ def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
         workspace_root=root,
         soul_home=soul_home,
         scratchpad_path=soul_home / "scratchpad.jsonl",
-        memory_path=soul_home / "memory.jsonl",
+        memory_path=soul_home / "MEMORY.md",
+        daily_memory_dir=soul_home / "memory",
+        memory_index_path=soul_home / "memory_index.sqlite",
         soul_path=root / "SOUL.md",
         ollama_base_url=os.environ.get("SOUL_OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
         ollama_keep_alive=os.environ.get("SOUL_OLLAMA_KEEP_ALIVE", "15m").strip() or "15m",
