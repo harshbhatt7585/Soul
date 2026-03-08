@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import argparse
-from contextlib import redirect_stdout
-import io
 from pathlib import Path
 import sys
 
@@ -14,8 +11,6 @@ if str(SRC) not in sys.path:
 
 from soul.agent.agent import Agent
 from soul.config import load_agent_config
-
-
 
 DEFAULT_PROMPTS = [
     "Hello",
@@ -29,9 +24,9 @@ agent = Agent(
     config=agent_config
 )
 
-response = agent.run("hello")
-if response.reasoning:
+response = agent.run("hello", stream=True, on_chunk=lambda chunk: print(chunk, end="", flush=True))
+print()
+reasoning = response.meta.get("reasoning", "")
+if reasoning:
     print("reasoning:")
-    print(response.reasoning)
-print("content:")
-print(response.content)
+    print(reasoning)

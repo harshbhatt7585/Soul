@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Callable
 
 from soul.agent.prompts import (
     build_planning_prompt,
@@ -12,7 +12,7 @@ from soul.agent.prompts import (
 )
 from soul.agent.tools import build_default_tools, build_ollama_tools
 from soul.agent.types import RunResult
-from soul.config import AgentConfig
+from soul.config import AgentConfig, model_for_mode
 from soul.models.llm import ChatMessage, ChatResponse, LLMHandler, LLMProvider
 from soul.utils import is_valid_plan, is_valid_response, is_valid_verification
 
@@ -62,20 +62,62 @@ class Agent:
         response = self._chat(model=model, prompt=prompt, extra_messages=extra_messages, format="json")
         return _extract_json(response.content)
 
-    def run(self, prompt):
-        plan_prompt = build_planning_prompt(prompt=prompt)
-        response = self._llm_handler.chat(
-            messages=self.context + [{'role': 'user', 'content': plan_prompt}],
-            model=self._config.model,
-            format='json',
+    def _chat(
+        self,
+        *,
+        model: str | None,
+        prompt: str,
+        extra_messages: list[ChatMessage] | None = None,
+        format: str | None = None,
+        stream: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> ChatResponse:
+        messages = list(self.context)
+        if extra_messages:
+            messages.extend(extra_messages)
+        messages.append({"role": "user", "content": prompt})
+        return self._llm_handler.chat(
+            messages=messages,
+            model=model_for_mode(self._config, "default", override=model),
+            format=format,
+            stream=stream,
+            on_chunk=on_chunk,
         )
-        
-        print(response)
-        return response
+
+    def run(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        stream: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> RunResult:
+        plan_prompt = build_planning_prompt(prompt=prompt)
+        response = self._chat(
+            model=model,
+            prompt=plan_prompt,
+            format="json",
+            stream=stream,
+            on_chunk=on_chunk,
+        )
+
+        return RunResult(
+            reply=response.content,
+            iterations=1,
+            meta={
+                "reasoning": response.reasoning,
+                "tool_calls": response.tool_calls,
+            },
+        )
 
 
     def reset(self) -> None:
-        self.context = []
+        self.context = [
+            {
+                "role": "system",
+                "content": build_system_prompt(self._config, name="Soul"),
+            }
+        ]
 
 
 SoulAgent = Agent

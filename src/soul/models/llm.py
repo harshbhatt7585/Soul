@@ -5,7 +5,7 @@ import json
 import re
 import socket
 from dataclasses import dataclass, field
-from typing import Any, TypedDict
+from typing import Any, Callable, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -49,6 +49,8 @@ class LLMProvider(ABC):
         messages: list[ChatMessage],
         tools: list[dict[str, Any]] | None = None,
         format: str | None = None,
+        stream: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ChatResponse:
         raise NotImplementedError
 
@@ -64,11 +66,13 @@ class OllamaProvider(LLMProvider):
         messages: list[ChatMessage],
         tools: list[dict[str, Any]] | None = None,
         format: str | None = None,
+        stream: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ChatResponse:
         payload = {
             "model": model,
             "messages": messages,
-            "stream": False,
+            "stream": stream,
         }
         if tools:
             payload["tools"] = tools
@@ -85,6 +89,8 @@ class OllamaProvider(LLMProvider):
         )
         try:
             with urlopen(request, timeout=self._config.request_timeout_seconds) as response:
+                if stream:
+                    return self._read_streaming_response(response, on_chunk=on_chunk)
                 body = response.read().decode("utf-8")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -122,6 +128,54 @@ class OllamaProvider(LLMProvider):
             raise RuntimeError(f"Ollama returned neither text nor tool calls: {body[:500]}")
         return ChatResponse(content=response_text, reasoning=reasoning, tool_calls=tool_calls)
 
+    def _read_streaming_response(
+        self,
+        response: Any,
+        *,
+        on_chunk: Callable[[str], None] | None,
+    ) -> ChatResponse:
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        raw_lines: list[str] = []
+
+        for raw_line in response:
+            decoded_line = raw_line.decode("utf-8").strip()
+            if not decoded_line:
+                continue
+            raw_lines.append(decoded_line)
+            try:
+                parsed = json.loads(decoded_line)
+            except json.JSONDecodeError as exc:
+                snippet = decoded_line[:500]
+                raise RuntimeError(f"Invalid streaming response from Ollama: {snippet}") from exc
+
+            message = parsed.get("message", {})
+            if not isinstance(message, dict):
+                continue
+
+            chunk = message.get("content", "")
+            if isinstance(chunk, str) and chunk:
+                content_parts.append(chunk)
+                if on_chunk is not None:
+                    on_chunk(chunk)
+
+            reasoning = message.get("thinking", message.get("reasoning_content", ""))
+            if isinstance(reasoning, str) and reasoning:
+                reasoning_parts.append(reasoning)
+
+            raw_tool_calls = message.get("tool_calls", [])
+            if isinstance(raw_tool_calls, list) and raw_tool_calls:
+                tool_calls = raw_tool_calls
+
+        response_text = "".join(content_parts)
+        response_text, extracted_reasoning = _extract_reasoning(response_text, {})
+        reasoning = extracted_reasoning or "".join(reasoning_parts).strip()
+        if not response_text.strip() and not tool_calls:
+            joined = "\n".join(raw_lines)[:500]
+            raise RuntimeError(f"Ollama returned neither text nor tool calls: {joined}")
+        return ChatResponse(content=response_text, reasoning=reasoning, tool_calls=tool_calls)
+
 
 class LLMHandler:
     def __init__(self, config: AgentConfig, provider: LLMProvider | None = None) -> None:
@@ -139,8 +193,17 @@ class LLMHandler:
         messages: list[ChatMessage],
         tools: list[dict[str, Any]] | None = None,
         format: str | None = None,
+        stream: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ChatResponse:
-        return self._provider.chat(model=model, messages=messages, tools=tools, format=format)
+        return self._provider.chat(
+            model=model,
+            messages=messages,
+            tools=tools,
+            format=format,
+            stream=stream,
+            on_chunk=on_chunk,
+        )
 
 
 __all__ = ["ChatMessage", "ChatResponse", "LLMHandler", "LLMProvider", "OllamaProvider"]
