@@ -29,4 +29,9 @@ agent = Agent(
     config=agent_config
 )
 
-print(agent.run("hello"))
+response = agent.run("hello")
+if response.reasoning:
+    print("reasoning:")
+    print(response.reasoning)
+print("content:")
+print(response.content)
