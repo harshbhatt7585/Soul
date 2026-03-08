@@ -105,6 +105,9 @@ class Agent:
             on_reasoning_chunk=on_reasoning_chunk,
         )
 
+        tool_calls = json.loads(response.content)['tool_calls']
+        print("\n", tool_calls)
+
         return RunResult(
             reply=response.content,
             iterations=1,

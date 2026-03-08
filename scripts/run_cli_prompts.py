@@ -47,7 +47,7 @@ def _print_content(chunk: str) -> None:
 
 
 response = agent.run(
-    "hello",
+    "What is the stock of google?",
     stream=True,
     on_chunk=_print_content,
     on_reasoning_chunk=_print_reasoning,
