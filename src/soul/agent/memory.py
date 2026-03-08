@@ -5,14 +5,26 @@ from datetime import UTC, datetime
 import json
 from pathlib import Path
 import re
+import sqlite3
 from typing import Any
 from uuid import uuid4
 
 from soul.config import AgentConfig
 
 
-def _tokenize(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]+", text.lower()))
+def _normalize_text(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _query_terms(text: str) -> list[str]:
+    seen: set[str] = set()
+    terms: list[str] = []
+    for term in re.findall(r"[a-z0-9]+", text.lower()):
+        if len(term) < 2 or term in seen:
+            continue
+        seen.add(term)
+        terms.append(term)
+    return terms
 
 
 @dataclass(slots=True)
@@ -34,6 +46,13 @@ class MemoryEntry:
 
 
 @dataclass(slots=True)
+class IndexedMemoryRecord:
+    entry: MemoryEntry
+    source_path: str
+    source_priority: int
+
+
+@dataclass(slots=True)
 class FileMemoryMatch:
     path: str
     excerpt: str
@@ -50,13 +69,17 @@ class FileMemoryMatch:
 class MemoryStore:
     def __init__(self, config: AgentConfig) -> None:
         self._path = config.memory_path
+        self._daily_dir = config.daily_memory_dir
+        self._index_path = config.memory_index_path
         self._legacy_path = self._path.with_name("memory.jsonl")
+        self._legacy_markdown_path = self._path.with_name("memory.md")
         self._workspace_root = config.workspace_root
         self._max_excerpt_chars = config.max_excerpt_chars
-        self._search_limit = config.search_limit
 
     def ensure_ready(self) -> Path:
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._daily_dir.mkdir(parents=True, exist_ok=True)
+        self._index_path.parent.mkdir(parents=True, exist_ok=True)
         if not self._path.exists():
             self._path.write_text("", encoding="utf-8")
         return self._path
@@ -70,38 +93,40 @@ class MemoryStore:
             created_at=datetime.now(UTC).isoformat(),
         )
         self.ensure_ready()
-        with self._path.open("a", encoding="utf-8") as handle:
+        with self._daily_path().open("a", encoding="utf-8") as handle:
             handle.write(self._format_entry(entry))
+        self._refresh_index(self._memory_records())
         return entry
 
     def reset(self) -> None:
         self.ensure_ready()
         self._path.write_text("", encoding="utf-8")
+        for path in self._daily_dir.glob("*.md"):
+            path.unlink()
+        if self._index_path.exists():
+            self._index_path.unlink()
 
     def all(self) -> list[MemoryEntry]:
-        self.ensure_ready()
-        entries = self._load_markdown_entries()
-        entries.extend(self._load_legacy_jsonl_entries())
-        return entries
+        return [record.entry for record in self._memory_records()]
 
     def search(self, *, query: str, limit: int) -> list[MemoryEntry]:
-        query_tokens = _tokenize(query)
-        entries = self.all()
-        scored: list[tuple[int, int, MemoryEntry]] = []
-        for idx, entry in enumerate(entries):
-            haystack = " ".join([entry.text, entry.kind, " ".join(entry.tags)])
-            entry_tokens = _tokenize(haystack)
-            overlap = len(query_tokens & entry_tokens)
-            if query_tokens and overlap == 0:
-                continue
-            scored.append((overlap, idx, entry))
+        match_query = self._build_match_query(query)
+        if not match_query:
+            return []
 
-        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        return [entry for _, _, entry in scored[:limit]]
+        records = self._memory_records()
+        if not records:
+            return []
+
+        self._refresh_index(records)
+        records_by_rowid = {index: record for index, record in enumerate(records, start=1)}
+        candidates = self._search_index(match_query=match_query, limit=max(limit * 8, limit), records_by_rowid=records_by_rowid)
+        ranked = self._rank_candidates(query=query, candidates=candidates)
+        return self._dedupe_entries([entry for _, _, _, entry in ranked], limit)
 
     def search_workspace(self, *, query: str, limit: int) -> list[FileMemoryMatch]:
-        query_tokens = _tokenize(query)
-        if not query_tokens:
+        query_terms = set(_query_terms(query))
+        if not query_terms:
             return []
 
         matches: list[FileMemoryMatch] = []
@@ -115,11 +140,11 @@ class MemoryStore:
             if not normalized:
                 continue
 
-            score = len(query_tokens & _tokenize(normalized))
+            score = len(query_terms & set(_query_terms(normalized)))
             if score == 0:
                 continue
 
-            excerpt = self._build_excerpt(normalized, query_tokens)
+            excerpt = self._build_excerpt(normalized, query_terms)
             matches.append(
                 FileMemoryMatch(
                     path=str(path.relative_to(self._workspace_root)),
@@ -130,6 +155,128 @@ class MemoryStore:
 
         matches.sort(key=lambda item: item.score, reverse=True)
         return matches[:limit]
+
+    def _memory_records(self) -> list[IndexedMemoryRecord]:
+        self.ensure_ready()
+        records: list[IndexedMemoryRecord] = []
+        records.extend(self._records_for_plaintext(self._path, kind="curated", source_priority=6))
+        for path in sorted(self._daily_dir.glob("*.md")):
+            records.extend(self._records_for_plaintext(path, kind="daily", source_priority=3))
+        records.extend(self._records_for_plaintext(self._legacy_markdown_path, kind="legacy_markdown", source_priority=2))
+        for entry in self._load_legacy_jsonl_entries():
+            priority = 5 if entry.kind == "preference" else 2
+            records.append(
+                IndexedMemoryRecord(
+                    entry=entry,
+                    source_path=str(self._legacy_path),
+                    source_priority=priority,
+                )
+            )
+        return records
+
+    def _records_for_plaintext(self, path: Path, *, kind: str, source_priority: int) -> list[IndexedMemoryRecord]:
+        return [
+            IndexedMemoryRecord(
+                entry=entry,
+                source_path=str(path),
+                source_priority=source_priority,
+            )
+            for entry in self._load_plaintext_entries(path, kind=kind)
+        ]
+
+    def _refresh_index(self, records: list[IndexedMemoryRecord]) -> None:
+        with self._connect_index() as connection:
+            connection.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts
+                USING fts5(
+                    text,
+                    kind UNINDEXED,
+                    source_path UNINDEXED,
+                    source_priority UNINDEXED,
+                    tokenize = 'porter unicode61'
+                )
+                """
+            )
+            connection.execute("DELETE FROM memory_fts")
+            connection.executemany(
+                """
+                INSERT INTO memory_fts(rowid, text, kind, source_path, source_priority)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        rowid,
+                        record.entry.text,
+                        record.entry.kind,
+                        record.source_path,
+                        record.source_priority,
+                    )
+                    for rowid, record in enumerate(records, start=1)
+                ],
+            )
+            connection.commit()
+
+    def _search_index(
+        self,
+        *,
+        match_query: str,
+        limit: int,
+        records_by_rowid: dict[int, IndexedMemoryRecord],
+    ) -> list[tuple[float, IndexedMemoryRecord]]:
+        with self._connect_index() as connection:
+            rows = connection.execute(
+                """
+                SELECT rowid, bm25(memory_fts) AS rank
+                FROM memory_fts
+                WHERE memory_fts MATCH ?
+                ORDER BY rank ASC, CAST(source_priority AS INTEGER) DESC
+                LIMIT ?
+                """,
+                (match_query, limit),
+            ).fetchall()
+
+        matches: list[tuple[float, IndexedMemoryRecord]] = []
+        for row in rows:
+            record = records_by_rowid.get(int(row["rowid"]))
+            if record is None:
+                continue
+            matches.append((float(row["rank"]), record))
+        return matches
+
+    def _rank_candidates(
+        self,
+        *,
+        query: str,
+        candidates: list[tuple[float, IndexedMemoryRecord]],
+    ) -> list[tuple[int, float, int, MemoryEntry]]:
+        normalized_query = _normalize_text(query)
+        ranked: list[tuple[int, float, int, MemoryEntry]] = []
+        for rank, record in candidates:
+            normalized_text = _normalize_text(record.entry.text)
+            exact_phrase = int(bool(normalized_query) and normalized_query in normalized_text)
+            ranked.append(
+                (
+                    exact_phrase,
+                    rank,
+                    record.source_priority,
+                    record.entry,
+                )
+            )
+        ranked.sort(key=lambda item: (-item[0], item[1], -item[2]))
+        return ranked
+
+    def _build_match_query(self, query: str) -> str:
+        terms = _query_terms(query)
+        if not terms:
+            return ""
+        return " OR ".join(f'"{term}"' for term in terms)
+
+    def _connect_index(self) -> sqlite3.Connection:
+        self.ensure_ready()
+        connection = sqlite3.connect(self._index_path)
+        connection.row_factory = sqlite3.Row
+        return connection
 
     def _iter_workspace_files(self) -> list[Path]:
         ignored_dirs = {
@@ -165,11 +312,11 @@ class MemoryStore:
             files.append(path)
         return files
 
-    def _build_excerpt(self, text: str, query_tokens: set[str]) -> str:
+    def _build_excerpt(self, text: str, query_terms: set[str]) -> str:
         words = text.split()
         for idx, word in enumerate(words):
             token = re.sub(r"[^a-z0-9]", "", word.lower())
-            if token in query_tokens:
+            if token in query_terms:
                 start = max(0, idx - 20)
                 end = min(len(words), idx + 20)
                 excerpt = " ".join(words[start:end])
@@ -179,58 +326,45 @@ class MemoryStore:
     def _format_entry(self, entry: MemoryEntry) -> str:
         return entry.text.strip() + "\n\n"
 
-    def _load_markdown_entries(self) -> list[MemoryEntry]:
-        raw = self._path.read_text(encoding="utf-8")
+    def _daily_path(self) -> Path:
+        date_key = datetime.now().strftime("%Y-%m-%d")
+        return self._daily_dir / f"{date_key}.md"
+
+    def _load_plaintext_entries(self, path: Path, *, kind: str) -> list[MemoryEntry]:
+        if not path.exists():
+            return []
+        raw = path.read_text(encoding="utf-8")
         entries: list[MemoryEntry] = []
         for block in re.split(r"\n\s*\n+", raw):
-            entry = self._parse_markdown_block(block)
+            entry = self._parse_plaintext_block(block, kind=kind)
             if entry is not None:
                 entries.append(entry)
         return entries
 
-    def _parse_markdown_block(self, block: str) -> MemoryEntry | None:
+    def _parse_plaintext_block(self, block: str, *, kind: str) -> MemoryEntry | None:
         content = block.strip()
         if not content:
             return None
-
-        if not content.startswith("## Memory"):
-            return MemoryEntry(
-                id=str(uuid4()),
-                kind="note",
-                text=content,
-                tags=[],
-                created_at="",
-            )
-
-        lines = [line.rstrip() for line in content.splitlines()]
-        meta: dict[str, str] = {}
-        text_lines: list[str] = []
-        in_text = False
-        for line in lines:
-            if in_text:
-                text_lines.append(line)
-                continue
-            if line == "text:":
-                in_text = True
-                continue
-            if ":" not in line:
-                continue
-            key, value = line.split(":", 1)
-            meta[key.strip()] = value.strip()
-
-        text = "\n".join(text_lines).strip()
-        if not text:
-            return None
-
-        raw_tags = meta.get("tags", "")
-        tags = [tag.strip() for tag in raw_tags.split(",") if tag.strip()]
         return MemoryEntry(
-            id=meta.get("id", str(uuid4())),
-            kind=meta.get("kind", "note") or "note",
-            text=text,
-            tags=tags,
-            created_at=meta.get("created_at", ""),
+            id=str(uuid4()),
+            kind=kind,
+            text=content,
+            tags=[],
+            created_at="",
         )
+
+    def _dedupe_entries(self, entries: list[MemoryEntry], limit: int) -> list[MemoryEntry]:
+        deduped: list[MemoryEntry] = []
+        seen: set[str] = set()
+        for entry in entries:
+            normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", "", entry.text.lower())).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(entry)
+            if len(deduped) >= limit:
+                break
+        return deduped
 
     def _load_legacy_jsonl_entries(self) -> list[MemoryEntry]:
         if not self._legacy_path.exists():
