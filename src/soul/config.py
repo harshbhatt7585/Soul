@@ -9,7 +9,7 @@ try:
 except ModuleNotFoundError:
     _load_dotenv = None
 
-DEFAULT_MODEL = "llama3.2:1b"
+DEFAULT_MODEL = "qwen3.5:2b"
 
 
 def _load_env_file(path: Path) -> None:
