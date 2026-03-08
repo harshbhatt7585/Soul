@@ -56,18 +56,18 @@ def _json_block(schema: dict[str, Any]) -> str:
 def build_planning_prompt(*, messages: list[dict[str, Any]]) -> str:
     return "\n".join(
         [
-            "Plan the next agent step.",
+            "Plan the agent step to fulfil the users's request.",
             "Think step by step before answering.",
-            "Reason through the latest user request, the available context, and whether tools are needed.",
+            "Reason through the user request whether tools are needed.",
             "If the user message is a simple acknowledgement, greeting, or sign-off, prefer a direct response with no tools.",
-            "Keep the plan focused on what is still missing.",
+            "Keep the plan focused.",
+            "Create todo list of plan"
             "Return JSON only.",
             "The plan should be simple and actionable.",
             _json_block(
                 {
-                    "todo": ["respond directly or gather missing information"],
-                    "reasoning": "step-by-step planning rationale",
-                    "notes": "short planning note",
+                    "reasoning": "....",
+                    "todo": ['.....'],
                 }
             ),
         ]
