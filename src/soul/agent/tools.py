@@ -405,8 +405,6 @@ class HTMLPraserAgentTool(Tools):
 
 def build_default_tools(config: AgentConfig) -> list[Tools]:
     return [
-        MemoryRecallAgentTool(config),
-        MemoryWriteAgentTool(config),
         WebSearchAgentTool(config),
         WebFetchAgentTool(config),
         HTMLPraserAgentTool(config),
