@@ -122,14 +122,29 @@ class Agent:
             on_reasoning_chunk=on_reasoning_chunk,
         )
 
+        planned_tool_calls = json.loads(response.content)['tool_calls']
+
+        tool_calling_prompt = build_tool_calling_prompt(prompt=prompt, tools_calls=planned_tool_calls)
+        response = self._chat(
+            model=model,
+            prompt=tool_calling_prompt,
+            format="json",
+            stream=stream,
+            on_chunk=on_chunk,
+            on_reasoning_chunk=on_reasoning_chunk,
+        )
+
         tools_to_call = json.loads(response.content)['tool_calls']
         tools_response = self._call_tools(tools_to_call)
+
+        print(tools_response)
 
         return RunResult(
             reply=json.dumps(tools_response, ensure_ascii=True),
             iterations=1,
             meta={
                 "reasoning": response.reasoning,
+                "planned_tool_calls": planned_tool_calls,
                 "tool_calls": tools_to_call,
                 "tools_response": tools_response,
             },
