@@ -76,7 +76,6 @@ def build_planning_prompt(*, prompt: str) -> str:
                         "first concrete next step",
                         "second concrete next step",
                     ],
-                    "notes": "",
                 }
             ),
         ]

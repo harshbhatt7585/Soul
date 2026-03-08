@@ -63,6 +63,22 @@ class Agent:
         response = self._chat(model=model, prompt=prompt, extra_messages=extra_messages, format="json")
         return _extract_json(response.content)
 
+    def _call_tools(self, tools_to_call: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        tools_response: list[dict[str, Any]] = []
+        for tool_call in tools_to_call:
+            if not isinstance(tool_call, dict):
+                continue
+            tool_name = str(tool_call.get("name", "")).strip()
+            tool_args = tool_call.get("args", {})
+            if not isinstance(tool_args, dict):
+                tool_args = {}
+            tool = self._tools.get(tool_name)
+            if tool is None:
+                tools_response.append({"ok": False, "tool": tool_name, "error": "unknown tool"})
+                continue
+            tools_response.append(tool(tool_args))
+        return tools_response
+
     def _chat(
         self,
         *,
@@ -106,31 +122,16 @@ class Agent:
             on_reasoning_chunk=on_reasoning_chunk,
         )
 
-        tool_calls = json.loads(response.content)['tool_calls']
-        print("\n", tool_calls)
-
-        tool_calling_prompt = build_tool_calling_prompt(prompt=prompt, tools_calls=tool_calls)
-
-        response = self._chat(
-            model=model,
-            prompt=tool_calling_prompt,
-            format="json",
-            stream=stream,
-            on_chunk=on_chunk,
-            on_reasoning_chunk=on_reasoning_chunk,
-
-        )
-
-
-
-        
+        tools_to_call = json.loads(response.content)['tool_calls']
+        tools_response = self._call_tools(tools_to_call)
 
         return RunResult(
-            reply=response.content,
+            reply=json.dumps(tools_response, ensure_ascii=True),
             iterations=1,
             meta={
                 "reasoning": response.reasoning,
-                "tool_calls": response.tool_calls,
+                "tool_calls": tools_to_call,
+                "tools_response": tools_response,
             },
         )
 
