@@ -54,32 +54,30 @@ def build_system_prompt(
 def _json_block(schema: dict[str, Any]) -> str:
     return json.dumps(schema, indent=2)
 
-
-def build_planning_prompt(*, messages: list[dict[str, Any]]) -> str:
-    return messages.append(
-            "\n".join(
-            [
-                "Plan the next agent step.",
-                "Think step by step before answering.",
-                "Reason through the latest user request, the available context, and whether tools are needed.",
-                "If the user message is a simple acknowledgement, greeting, or sign-off, prefer a direct response with no tools.",
-                "Keep the plan focused on what is still missing.",
-                "Return JSON only.",
-                "The plan should be simple and actionable.",
-                _json_block(
-                    {
-                        "todo": ["respond directly or gather missing information"],
-                        "reasoning": "step-by-step planning rationale",
-                        "notes": "short planning note",
-                    }
-                ),
-            ]
-        )
+def build_planning_prompt(*, messages: list[dict[str, Any]]) -> None:
+    content = "\n".join(
+        [
+            "Plan the next agent step.",
+            "Think step by step before answering.",
+            "Reason through the latest user request, the available context, and whether tools are needed.",
+            "If the user message is a simple acknowledgement, greeting, or sign-off, prefer a direct response with no tools.",
+            "Keep the plan focused on what is still missing.",
+            "Return JSON only.",
+            "The plan should be simple and actionable.",
+            _json_block(
+                {
+                    "todo": ["respond directly or gather missing information"],
+                    "reasoning": "step-by-step planning rationale",
+                    "notes": "short planning note",
+                }
+            ),
+        ]
     )
+    messages.append({'role': 'system', 'content': content})
 
 
-def build_tool_identification_prompt(*, messages: list[dict[str, Any]]) -> str:
-    return messages.append("\n".join(
+def build_tool_identification_prompt(*, messages: list[dict[str, Any]]) -> None:
+    content = "\n".join(
         [
             "Identify which tools, if any, should be called next.",
             "Think step by step before answering.",
@@ -90,13 +88,12 @@ def build_tool_identification_prompt(*, messages: list[dict[str, Any]]) -> str:
             "If a tool previously failed and retrying without new information will not help, call no tools.",
             "When you decide no tools are needed, answer with normal text and do not invent tool calls.",
         ]
-        )
     )
+    messages.append({'role': 'system', 'content': content})
 
 
-def verification_prompt(*, messages: list[dict[str, Any]]) -> str:
-    return messages.append(
-            "\n".join(
+def verification_prompt(*, messages: list[dict[str, Any]]) -> None:
+    content = "\n".join(
         [
             "Verify whether the current context is sufficient to answer the user.",
             "Think step by step before answering.",
@@ -113,12 +110,11 @@ def verification_prompt(*, messages: list[dict[str, Any]]) -> str:
             ),
         ]
     )
-    )
+    messages.append({'role': 'system', 'content': content})
 
 
-def build_respond_prompt(*, messages: list[dict[str, Any]]) -> str:
-    return messages.append(
-        "\n".join(
+def build_respond_prompt(*, messages: list[dict[str, Any]]) -> None:
+    content = "\n".join(
         [
             "Write the final response to the user using the available context.",
             "Think step by step before answering.",
@@ -133,4 +129,5 @@ def build_respond_prompt(*, messages: list[dict[str, Any]]) -> str:
             ),
         ]
     )
-    ) 
+    messages.append({'role': 'system', 'content': content})
+
