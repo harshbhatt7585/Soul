@@ -135,20 +135,23 @@ class Agent:
         )
 
         tools_to_call = _extract_json(response.content).get('tool_calls', [])
-        tools_response = self._call_tools(tools_to_call)
+        tools_output = self._call_tools(tools_to_call)
 
-        print(tools_response)
+        print("TOOLS OUTPUT", tools_output)
 
-        return RunResult(
-            reply=json.dumps(tools_response, ensure_ascii=True),
-            iterations=1,
-            meta={
-                "reasoning": response.reasoning,
-                "planned_tool_calls": planned_tool_calls,
-                "tool_calls": tools_to_call,
-                "tools_response": tools_response,
-            },
+
+        response_prompt = build_respond_prompt(prompt=prompt, tools_output=json.dumps(tools_output))
+
+        response = self._chat(
+            model=model,
+            prompt=response_prompt,
+            format="json",
+            stream=stream,
+            on_chunk=on_chunk,
+            on_reasoning_chunk=on_reasoning_chunk,
         )
+
+        return response
 
 
     def reset(self) -> None:
