@@ -60,7 +60,8 @@ def build_planning_prompt(*, prompt: str) -> str:
             "Plan the next agent step for the user's request.",
             f"User request: {prompt}",
             f"Available tools: {json.dumps(get_tools(), ensure_ascii=True)}",
-            "Return JSON only. Do not include markdown, headings, prose, or code fences.",
+            "Return exactly one valid JSON object only.",
+            "Do not include markdown, headings, prose, code fences, comments, or trailing text.",
             "Focus on the user's task, not on how to build an agent or reasoning system.",
             "Use a short reasoning string.",
             "Set todo to a list of actionable strings only.",
@@ -71,11 +72,20 @@ def build_planning_prompt(*, prompt: str) -> str:
             _json_block(
                 {
                     "reasoning": "brief planning rationale",
-                    "tool_calls": ["tool_name1", "tool_name2"],
+                    "tool_calls": [
+                        {
+                            "name": "web_search",
+                            "args": {
+                                "query": "current Google stock price",
+                                "topic": "general",
+                            },
+                        }
+                    ],
                     "todo": [
                         "first concrete next step",
                         "second concrete next step",
                     ],
+                    "notes": "",
                 }
             ),
         ]
@@ -88,8 +98,10 @@ def build_tool_calling_prompt(*, prompt: str, tools_calls: list[dict[str, Any]])
             f"User request: {prompt}",
             f"Planned tool calls: {json.dumps(tools_calls, ensure_ascii=True)}",
             "Use only the available tools.",
-            "Return JSON only. Do not include markdown, prose, or code fences.",
+            "Return exactly one valid JSON object only.",
+            "Do not include markdown, prose, code fences, comments, or trailing text.",
             "Set tool_calls to a list of objects with name and args.",
+            "Every tool call must include both name and args.",
             "If no tool is needed, return an empty tool_calls list.",
             _json_block(
                 {

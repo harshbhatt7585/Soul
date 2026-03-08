@@ -122,7 +122,7 @@ class Agent:
             on_reasoning_chunk=on_reasoning_chunk,
         )
 
-        planned_tool_calls = json.loads(response.content)['tool_calls']
+        planned_tool_calls = _extract_json(response.content).get('tool_calls', [])
 
         tool_calling_prompt = build_tool_calling_prompt(prompt=prompt, tools_calls=planned_tool_calls)
         response = self._chat(
@@ -134,7 +134,7 @@ class Agent:
             on_reasoning_chunk=on_reasoning_chunk,
         )
 
-        tools_to_call = json.loads(response.content)['tool_calls']
+        tools_to_call = _extract_json(response.content).get('tool_calls', [])
         tools_response = self._call_tools(tools_to_call)
 
         print(tools_response)
