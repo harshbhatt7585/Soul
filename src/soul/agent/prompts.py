@@ -66,7 +66,7 @@ def build_planning_prompt(*, prompt: str) -> str:
             "Use a short reasoning string.",
             "Set todo to a list of actionable strings only.",
             "Set tool_calls to a list of objects with name and args.",
-            "If the user asks about saved preferences, past decisions, earlier context, memory, or repository facts, tool_calls must include memory_recall.",
+            "If the user asks about saved preferences, likes, dislikes, past decisions, earlier context, memory, repository facts, or what they told you before, tool_calls must include memory_recall.",
             "If the request needs current, financial, external, or real-time information, tool_calls must not be empty.",
             "If the request can be answered directly without tools, return an empty tool_calls list.",
             "If no tool is needed yet, keep the plan direct and simple.",
@@ -91,16 +91,21 @@ def build_planning_prompt(*, prompt: str) -> str:
 def build_tool_calling_prompt(*, prompt: str, tools_calls: list[dict[str, Any]]) -> str:
     return "\n".join(
         [
-            "Choose the tool calls needed to fulfill the user's request.",
+            "Convert the planned tool calls into concrete tool calls with args.",
             f"User request: {prompt}",
             f"Planned tool calls: {json.dumps(tools_calls, ensure_ascii=True)}",
             "Use only the available tools.",
+            "Treat planned tool calls as authoritative. Do not re-decide whether a tool is needed.",
+            "If Planned tool calls is non-empty, tool_calls must not be empty.",
+            "Keep the same tool names from Planned tool calls and fill in only the args.",
             "Return exactly one valid JSON object only.",
             "Do not include markdown, prose, code fences, comments, or trailing text.",
             "Set tool_calls to a list of objects with name and args.",
             "Every tool call must include both name and args.",
+            "Tool usage guide:",
+            *[f"- {guide}" for guide in get_tool_usage_guide()],
             "If the planned tool is memory_recall, include a query that searches for the user's past preference, decision, or relevant file context.",
-            "If no tool is needed, return an empty tool_calls list.",
+            "Return an empty tool_calls list only when Planned tool calls is empty.",
             _json_block(
                 {
                     "tool_calls": [
@@ -128,7 +133,7 @@ def build_tool_identification_prompt(*, messages: list[dict[str, Any]]) -> str:
             *[f"- {guide}" for guide in get_tool_usage_guide()],
             "Use tools only when the answer cannot be completed reliably from the current conversation.",
             "If the user message is a simple acknowledgement, greeting, or sign-off, call no tools.",
-            "If the request may depend on saved preferences or past facts and memory has not been checked, prefer memory_recall before other tools.",
+            "If the request may depend on saved preferences, likes, dislikes, past facts, or what the user said earlier and memory has not been checked, prefer memory_recall before other tools.",
             "Do not call web_search for generic chit-chat, acknowledgements, or when the answer is already available from context.",
             "If a tool previously failed and retrying without new information will not help, call no tools.",
             "When you decide no tools are needed, answer with normal text and do not invent tool calls.",
@@ -160,9 +165,9 @@ def build_respond_prompt(*, prompt, tools_output) -> str:
     return "\n".join(
         [
             f"User's request: {prompt}",
-            f"Tools Output: {tools_output}"
-            "You are a response agent who will write final response to user given all context collected."
-            "Use given context collected by prior agents to produce final output"
+            f"Tools Output: {tools_output}",
+            "You are a response agent who will write the final response to the user from the collected context.",
+            "Use the given context collected by prior agents to produce the final output.",
             "Think step by step before answering.",
             "Use the reasoning to produce the best concise final response.",
             "If memory results were returned, use only the relevant confirmed memories.",
