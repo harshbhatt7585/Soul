@@ -93,7 +93,7 @@ class _HTMLMetadataParser(HTMLParser):
 
 
 class MemoryRecallAgentTool(Tools):
-    description = "Recall relevant memory entries for the current prompt."
+    description = "Recall relevant saved memories and related details from workspace files."
 
     def __init__(self, config: AgentConfig) -> None:
         super().__init__("memory_recall")
@@ -112,12 +112,15 @@ class MemoryRecallAgentTool(Tools):
             max_results = self._config.search_limit
 
         matches = self._store.search(query=query, limit=max_results)
+        file_matches = self._store.search_workspace(query=query, limit=max_results)
         return {
             "ok": True,
             "tool": self.name,
             "query": query,
             "memories": [entry.to_dict() for entry in matches],
             "memory_count": len(matches),
+            "file_memories": [match.to_dict() for match in file_matches],
+            "file_memory_count": len(file_matches),
         }
 
     def schema(self) -> dict[str, Any]:
@@ -405,6 +408,8 @@ class HTMLPraserAgentTool(Tools):
 
 def build_default_tools(config: AgentConfig) -> list[Tools]:
     return [
+        MemoryRecallAgentTool(config),
+        MemoryWriteAgentTool(config),
         WebSearchAgentTool(config),
         WebFetchAgentTool(config),
         HTMLPraserAgentTool(config),
@@ -413,11 +418,21 @@ def build_default_tools(config: AgentConfig) -> list[Tools]:
 
 def get_tools() -> list[str]:
     return [
-        # f"memory_recall: {MemoryRecallAgentTool.description}",
-        # f"memory_write: {MemoryWriteAgentTool.description}",
+        f"memory_recall: {MemoryRecallAgentTool.description}",
+        f"memory_write: {MemoryWriteAgentTool.description}",
         f"web_search: {WebSearchAgentTool.description}",
         f"web_fetch: {WebFetchAgentTool.description}",
         f"html_praser: {HTMLPraserAgentTool.description}",
+    ]
+
+
+def get_tool_usage_guide() -> list[str]:
+    return [
+        "memory_recall args: {\"query\": string, \"limit\": integer optional}. Use for saved preferences, past decisions, repo facts, and local file memory.",
+        "memory_write args: {\"text\": string, \"kind\": string optional, \"tags\": string[] optional}. Use to save durable preferences, decisions, and important facts.",
+        "web_search args: {\"query\": string, \"topic\": \"general\"|\"news\" optional, \"limit\": integer optional}. Use for current facts, finance, news, and external information.",
+        "web_fetch args: {\"url\": string}. Use to fetch and verify a specific page after search.",
+        "html_praser args: {\"html\": string}. Use to parse raw HTML into readable text and links.",
     ]
 
 
@@ -440,4 +455,5 @@ __all__ = [
     "build_ollama_tools",
     "format_tool_result",
     "get_tools",
+    "get_tool_usage_guide",
 ]

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from soul.agent.tools import get_tools
+from soul.agent.tools import get_tool_usage_guide, get_tools
 from soul.config import AgentConfig
 
 DEFAULT_SOUL_PROMPT = """# Soul
@@ -66,6 +66,7 @@ def build_planning_prompt(*, prompt: str) -> str:
             "Use a short reasoning string.",
             "Set todo to a list of actionable strings only.",
             "Set tool_calls to a list of objects with name and args.",
+            "If the user asks about saved preferences, past decisions, earlier context, memory, or repository facts, tool_calls must include memory_recall.",
             "If the request needs current, financial, external, or real-time information, tool_calls must not be empty.",
             "If the request can be answered directly without tools, return an empty tool_calls list.",
             "If no tool is needed yet, keep the plan direct and simple.",
@@ -74,11 +75,7 @@ def build_planning_prompt(*, prompt: str) -> str:
                     "reasoning": "brief planning rationale",
                     "tool_calls": [
                         {
-                            "name": "web_search",
-                            "args": {
-                                "query": "current Google stock price",
-                                "topic": "general",
-                            },
+                            "name": "tool_name",
                         }
                     ],
                     "todo": [
@@ -102,6 +99,7 @@ def build_tool_calling_prompt(*, prompt: str, tools_calls: list[dict[str, Any]])
             "Do not include markdown, prose, code fences, comments, or trailing text.",
             "Set tool_calls to a list of objects with name and args.",
             "Every tool call must include both name and args.",
+            "If the planned tool is memory_recall, include a query that searches for the user's past preference, decision, or relevant file context.",
             "If no tool is needed, return an empty tool_calls list.",
             _json_block(
                 {
@@ -126,6 +124,8 @@ def build_tool_identification_prompt(*, messages: list[dict[str, Any]]) -> str:
         [
             "Identify which tools, if any, should be called next.",
             "Think step by step before answering.",
+            "Tool usage guide:",
+            *[f"- {guide}" for guide in get_tool_usage_guide()],
             "Use tools only when the answer cannot be completed reliably from the current conversation.",
             "If the user message is a simple acknowledgement, greeting, or sign-off, call no tools.",
             "If the request may depend on saved preferences or past facts and memory has not been checked, prefer memory_recall before other tools.",
