@@ -156,10 +156,13 @@ def verification_prompt(*, messages: list[dict[str, Any]]) -> str:
     )
 
 
-def build_respond_prompt(*, messages: list[dict[str, Any]]) -> str:
+def build_respond_prompt(*, prompt, tools_output) -> str:
     return "\n".join(
         [
-            "Write the final response to the user using the available context.",
+            f"User's request: {prompt}",
+            f"Tools Output: {tools_output}"
+            "You are a response agent who will write final response to user given all context collected."
+            "Use given context collected by prior agents to produce final output"
             "Think step by step before answering.",
             "Use the reasoning to produce the best concise final response.",
             "If memory results were returned, use only the relevant confirmed memories.",
