@@ -58,6 +58,9 @@ class AgentConfig:
     memory_path: Path
     soul_path: Path
     ollama_base_url: str
+    ollama_keep_alive: str
+    ollama_think: bool
+    ollama_num_ctx: int
     model: str
     request_timeout_seconds: float
     max_document_bytes: int
@@ -65,6 +68,18 @@ class AgentConfig:
     search_limit: int
     user_agent: str
     tavily_api_key: str
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
@@ -80,6 +95,9 @@ def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
         memory_path=soul_home / "memory.jsonl",
         soul_path=root / "SOUL.md",
         ollama_base_url=os.environ.get("SOUL_OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
+        ollama_keep_alive=os.environ.get("SOUL_OLLAMA_KEEP_ALIVE", "15m").strip() or "15m",
+        ollama_think=_env_bool("SOUL_OLLAMA_THINK", False),
+        ollama_num_ctx=_env_int("SOUL_OLLAMA_NUM_CTX", 2048),
         model=os.environ.get("SOUL_MODEL", os.environ.get("SOUL_MANUAL_MODEL", DEFAULT_MODEL)),
         request_timeout_seconds=_env_float("SOUL_REQUEST_TIMEOUT_SECONDS", 120.0),
         max_document_bytes=_env_int("SOUL_MAX_DOCUMENT_BYTES", 1_500_000),

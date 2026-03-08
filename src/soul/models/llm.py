@@ -75,6 +75,11 @@ class OllamaProvider(LLMProvider):
             "model": model,
             "messages": messages,
             "stream": stream,
+            "keep_alive": self._config.ollama_keep_alive,
+            "think": self._config.ollama_think,
+            "options": {
+                "num_ctx": self._config.ollama_num_ctx,
+            },
         }
         if tools:
             payload["tools"] = tools
