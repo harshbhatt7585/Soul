@@ -9,9 +9,7 @@ try:
 except ModuleNotFoundError:
     _load_dotenv = None
 
-DEFAULT_MANUAL_MODEL = "llama3.2:1b"
-DEFAULT_AUTONOMOUS_MODEL = "qwen2.5:0.5b"
-DEFAULT_RESEARCH_MODEL = "llama3.2:1b"
+DEFAULT_MODEL = "llama3.2:1b"
 
 
 def _load_env_file(path: Path) -> None:
@@ -60,9 +58,7 @@ class AgentConfig:
     memory_path: Path
     soul_path: Path
     ollama_base_url: str
-    manual_model: str
-    autonomous_model: str
-    research_model: str
+    model: str
     request_timeout_seconds: float
     max_document_bytes: int
     max_excerpt_chars: int
@@ -84,9 +80,7 @@ def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
         memory_path=soul_home / "memory.jsonl",
         soul_path=root / "SOUL.md",
         ollama_base_url=os.environ.get("SOUL_OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
-        manual_model=os.environ.get("SOUL_MANUAL_MODEL", DEFAULT_MANUAL_MODEL),
-        autonomous_model=os.environ.get("SOUL_AUTONOMOUS_MODEL", DEFAULT_AUTONOMOUS_MODEL),
-        research_model=os.environ.get("SOUL_RESEARCH_MODEL", DEFAULT_RESEARCH_MODEL),
+        model=os.environ.get("SOUL_MODEL", os.environ.get("SOUL_MANUAL_MODEL", DEFAULT_MODEL)),
         request_timeout_seconds=_env_float("SOUL_REQUEST_TIMEOUT_SECONDS", 20.0),
         max_document_bytes=_env_int("SOUL_MAX_DOCUMENT_BYTES", 1_500_000),
         max_excerpt_chars=_env_int("SOUL_MAX_EXCERPT_CHARS", 4_000),
@@ -97,12 +91,10 @@ def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
 
 
 def model_for_mode(config: AgentConfig, mode: str, override: str | None = None) -> str:
-    # TODO: Route research mode explicitly and reject unknown modes instead of falling back implicitly.
+    del mode
     if override:
         return override
-    if mode == "autonomous":
-        return config.autonomous_model
-    return config.manual_model
+    return config.model
 
 
 Settings = AgentConfig

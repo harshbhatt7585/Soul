@@ -78,7 +78,7 @@ class Agent:
         if extra_messages:
             messages[-1:-1] = extra_messages
         return self._llm_handler.chat(
-            model=model or self._config.manual_model,
+            model=model or self._config.model,
             messages=messages,
             tools=tools,
             format=format,
@@ -172,10 +172,12 @@ class Agent:
                 {"tool_calls": tool_calls},
                 ensure_ascii=True,
             )
+            print("-----------------------------------------------")
             print("TOOL IDENTIFUCATION:", tool_identification_text)
             self.context.append({"role": "assistant", "content": tool_identification_text})
 
             tool_results = self._run_tool_calls(tool_calls)
+            print("-----------------------------------------------")
             print("tool results", tool_results)
             tool_messages: list[ChatMessage] = []
             if tool_identification.tool_calls:
@@ -202,6 +204,7 @@ class Agent:
                 prompt=build_respond_prompt(messages=self.context),
                 extra_messages=tool_messages,
             )
+            print("-----------------------------------------------")
             print("RESPONSE:", response)
             if not is_valid_response(response):
                 self.context.append(
@@ -235,6 +238,7 @@ class Agent:
                 prompt=verification_prompt(messages=verification_messages),
                 extra_messages=tool_messages,
             )
+            print("-----------------------------------------------")
             print("VERIFICATION: ", verification)
             if not is_valid_verification(verification):
                 self.context.append(
