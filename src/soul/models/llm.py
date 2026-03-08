@@ -79,6 +79,7 @@ class OllamaProvider(LLMProvider):
             "think": self._config.ollama_think,
             "options": {
                 "num_ctx": self._config.ollama_num_ctx,
+                "temperature": self._config.ollama_temperature,
             },
         }
         if tools:

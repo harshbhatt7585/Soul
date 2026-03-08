@@ -61,6 +61,7 @@ class AgentConfig:
     ollama_keep_alive: str
     ollama_think: bool
     ollama_num_ctx: int
+    ollama_temperature: float
     model: str
     request_timeout_seconds: float
     max_document_bytes: int
@@ -98,6 +99,7 @@ def load_agent_config(workspace_root: Path | None = None) -> AgentConfig:
         ollama_keep_alive=os.environ.get("SOUL_OLLAMA_KEEP_ALIVE", "15m").strip() or "15m",
         ollama_think=_env_bool("SOUL_OLLAMA_THINK", False),
         ollama_num_ctx=_env_int("SOUL_OLLAMA_NUM_CTX", 2048),
+        ollama_temperature=_env_float("SOUL_OLLAMA_TEMPERATURE", 0.7),
         model=os.environ.get("SOUL_MODEL", os.environ.get("SOUL_MANUAL_MODEL", DEFAULT_MODEL)),
         request_timeout_seconds=_env_float("SOUL_REQUEST_TIMEOUT_SECONDS", 120.0),
         max_document_bytes=_env_int("SOUL_MAX_DOCUMENT_BYTES", 1_500_000),
