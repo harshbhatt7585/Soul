@@ -112,7 +112,7 @@ class MemoryRecallAgentTool(Tools):
             max_results = self._config.search_limit
 
         matches = self._store.search(query=query, limit=max_results)
-        file_matches = self._store.search_workspace(query=query, limit=max_results)
+        file_matches = [] if matches else self._store.search_workspace(query=query, limit=max_results)
         return {
             "ok": True,
             "tool": self.name,
