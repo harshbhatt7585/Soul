@@ -14,6 +14,7 @@ def is_valid_plan(payload: dict[str, Any]) -> bool:
     todo = payload.get("todo")
     reasoning = payload.get("reasoning")
     notes = payload.get("notes", "")
+    tool_calls = payload.get("tool_calls", [])
 
     if not isinstance(todo, list):
         return False
@@ -23,8 +24,19 @@ def is_valid_plan(payload: dict[str, Any]) -> bool:
         return False
     if not isinstance(notes, str):
         return False
+    if not isinstance(tool_calls, list):
+        return False
+    for item in tool_calls:
+        if not isinstance(item, dict):
+            return False
+        name = item.get("name")
+        args = item.get("args")
+        if not _is_non_empty_string(name):
+            return False
+        if not isinstance(args, dict):
+            return False
 
-    forbidden_keys = {"text", "ok", "tool_calls"}
+    forbidden_keys = {"text", "ok"}
     return not any(key in payload for key in forbidden_keys)
 
 

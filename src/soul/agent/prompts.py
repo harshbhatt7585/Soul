@@ -59,20 +59,24 @@ def build_planning_prompt(*, prompt: str) -> str:
         [
             "Plan the next agent step for the user's request.",
             f"User request: {prompt}",
-            f"AVAILABLE TOOLS: {get_tools()}"
+            f"Available tools: {json.dumps(get_tools(), ensure_ascii=True)}",
             "Return JSON only. Do not include markdown, headings, prose, or code fences.",
             "Focus on the user's task, not on how to build an agent or reasoning system.",
             "Use a short reasoning string.",
             "Set todo to a list of actionable strings only.",
+            "Set tool_calls to a list of objects with name and args.",
+            "If the request needs current, financial, external, or real-time information, tool_calls must not be empty.",
+            "If the request can be answered directly without tools, return an empty tool_calls list.",
             "If no tool is needed yet, keep the plan direct and simple.",
             _json_block(
                 {
                     "reasoning": "brief planning rationale",
-                    "tool_calls": [], 
+                    "tool_calls": ["tool_name1", "tool_name2"],
                     "todo": [
                         "first concrete next step",
                         "second concrete next step",
                     ],
+                    "notes": "",
                 }
             ),
         ]
