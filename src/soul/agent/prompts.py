@@ -53,21 +53,24 @@ def build_system_prompt(
 def _json_block(schema: dict[str, Any]) -> str:
     return json.dumps(schema, indent=2)
 
-def build_planning_prompt(*, messages: list[dict[str, Any]]) -> str:
+
+def build_planning_prompt(*, prompt: str) -> str:
     return "\n".join(
         [
-            "Plan the agent step to fulfil the users's request.",
-            "Think step by step before answering.",
-            "Reason through the user request whether tools are needed.",
-            "If the user message is a simple acknowledgement, greeting, or sign-off, prefer a direct response with no tools.",
-            "Keep the plan focused.",
-            "Create todo list of plan"
-            "Return JSON only.",
-            "The plan should be simple and actionable.",
+            "Plan the next agent step for the user's request.",
+            f"User request: {prompt}",
+            "Return JSON only. Do not include markdown, headings, prose, or code fences.",
+            "Focus on the user's task, not on how to build an agent or reasoning system.",
+            "Use a short reasoning string.",
+            "Set todo to a list of actionable strings only.",
+            "If no tool is needed yet, keep the plan direct and simple.",
             _json_block(
                 {
-                    "reasoning": "....",
-                    "todo": ['.....'],
+                    "reasoning": "brief planning rationale",
+                    "todo": [
+                        "first concrete next step",
+                        "second concrete next step",
+                    ],
                 }
             ),
         ]

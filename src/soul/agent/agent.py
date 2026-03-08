@@ -63,15 +63,13 @@ class Agent:
         return _extract_json(response.content)
 
     def run(self, prompt):
-        self.context.append({
-            'role': 'user',
-            'content': prompt,
-        })
-        plan_prompt = build_planning_prompt(messages=self.context)
+        plan_prompt = build_planning_prompt(prompt=prompt)
         response = self._llm_handler.chat(
-            messages=self.context + [{'role': 'system', 'content': plan_prompt}],
+            messages=self.context + [{'role': 'user', 'content': plan_prompt}],
             model=self._config.model,
+            format='json',
         )
+        
         print(response)
         return response
 
