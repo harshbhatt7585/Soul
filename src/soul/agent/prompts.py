@@ -78,6 +78,33 @@ def build_planning_prompt(*, prompt: str) -> str:
         ]
     )
 
+def build_tool_calling_prompt(*, prompt: str, tools_calls: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        [
+            "Choose the tool calls needed to fulfill the user's request.",
+            f"User request: {prompt}",
+            f"Planned tool calls: {json.dumps(tools_calls, ensure_ascii=True)}",
+            "Use only the available tools.",
+            "Return JSON only. Do not include markdown, prose, or code fences.",
+            "Set tool_calls to a list of objects with name and args.",
+            "If no tool is needed, return an empty tool_calls list.",
+            _json_block(
+                {
+                    "tool_calls": [
+                        {
+                            "name": "tool_name",
+                            "args": {
+                                "key": "value",
+                            },
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+
+
+
 
 def build_tool_identification_prompt(*, messages: list[dict[str, Any]]) -> str:
     return "\n".join(
