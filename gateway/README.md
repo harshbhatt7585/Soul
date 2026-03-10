@@ -26,6 +26,7 @@ Runtime layout:
 - `.soul/gateway/failed`: failed outbound message records
 - `.soul/gateway/logs/gateway.log`: persistent runtime logs
 - `.soul/gateway/logs/agent.log`: per-message Soul bridge logs with prompt, reply, meta, and captured debug output
+- `.soul/gateway/gateway.lock`: single-instance process lock
 
 ## Install
 
@@ -85,3 +86,4 @@ Environment variables:
 - This uses WhatsApp Web through Baileys, not the official WhatsApp Business API.
 - The gateway should run as a long-lived process. Use `pm2`, `launchd`, `systemd`, or another daemon manager in practice.
 - Cron should enqueue outbound work, not restart the WhatsApp socket every minute.
+- Only one Soul gateway process should run at a time. A second start will now fail fast instead of replacing the active session.

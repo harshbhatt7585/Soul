@@ -62,6 +62,7 @@ export function loadConfig() {
     failedDir: path.join(gatewayHome, "failed"),
     logsDir: path.join(gatewayHome, "logs"),
     logFile: path.join(gatewayHome, "logs", "gateway.log"),
+    lockFile: path.join(gatewayHome, "gateway.lock"),
     pythonBin: process.env.SOUL_GATEWAY_PYTHON || path.join(rootDir, ".venv", "bin", "python3"),
     soulBridgeScript:
       process.env.SOUL_GATEWAY_BRIDGE_SCRIPT || path.join(rootDir, "scripts", "run_gateway_request.py"),

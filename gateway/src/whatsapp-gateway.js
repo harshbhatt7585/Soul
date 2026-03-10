@@ -29,12 +29,34 @@ export class WhatsAppGateway {
     this.outboxTimer = null;
     this.reconnectAttempts = 0;
     this.reconnectTimer = null;
+    this.stopped = false;
   }
 
   async start() {
+    this.stopped = false;
     await this._ensureDirs();
     await this._connect();
     this._startOutboxLoop();
+  }
+
+  async stop() {
+    this.stopped = true;
+    if (this.outboxTimer) {
+      clearInterval(this.outboxTimer);
+      this.outboxTimer = null;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.sock) {
+      try {
+        this.sock.end(undefined);
+      } catch {
+        // best-effort shutdown
+      }
+      this.sock = null;
+    }
   }
 
   async _ensureDirs() {
@@ -46,6 +68,9 @@ export class WhatsAppGateway {
   }
 
   async _connect() {
+    if (this.stopped) {
+      return;
+    }
     const { state, saveCreds } = await useMultiFileAuthState(this.config.authDir);
     const { version, isLatest } = await fetchLatestBaileysVersion().catch((error) => {
       this.logger.warn({ error }, "failed to fetch latest Baileys version, using bundled default");
@@ -54,7 +79,6 @@ export class WhatsAppGateway {
     const sock = makeWASocket({
       auth: state,
       browser: Browsers.macOS("Chrome"),
-      printQRInTerminal: true,
       logger: this.logger,
       markOnlineOnConnect: false,
       syncFullHistory: false,
@@ -115,6 +139,11 @@ export class WhatsAppGateway {
       this.logger.error("WhatsApp session logged out; remove auth files and relink");
       return;
     }
+    if (statusCode === DisconnectReason.connectionReplaced) {
+      this.logger.error("WhatsApp connection was replaced by another active session; stopping gateway");
+      await this.stop();
+      return;
+    }
 
     const delayMs = Math.min(1000 * (2 ** this.reconnectAttempts), 30000);
     this.reconnectAttempts += 1;
@@ -123,6 +152,9 @@ export class WhatsAppGateway {
   }
 
   _scheduleReconnect(delayMs) {
+    if (this.stopped) {
+      return;
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
     }
