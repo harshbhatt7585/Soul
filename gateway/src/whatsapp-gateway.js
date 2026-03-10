@@ -13,6 +13,18 @@ import { extractMessageText, isGroupJid, isStatusJid, normalizeSenderJid } from 
 import { OutboxProcessor } from "./outbox.js";
 import { SoulBridge } from "./soul-bridge.js";
 
+function extractTriggerPrompt(text) {
+  const trimmed = typeof text === "string" ? text.trim() : "";
+  if (!trimmed) {
+    return "";
+  }
+  const match = /^SOUL(?:\b|:)\s*([\s\S]*)$/i.exec(trimmed);
+  if (!match) {
+    return "";
+  }
+  return (match[1] || "").trim();
+}
+
 export class WhatsAppGateway {
   constructor(config) {
     this.config = config;
@@ -204,6 +216,11 @@ export class WhatsAppGateway {
       return;
     }
     const isFromMe = Boolean(message?.key?.fromMe);
+    const agentText = extractTriggerPrompt(text);
+    if (!agentText) {
+      this.logger.info({ jid, text, fromMe: isFromMe }, "ignored message without SOUL prefix");
+      return;
+    }
 
     if (this.config.markRead && message?.key && this.sock) {
       await this.sock.readMessages([message.key]);
@@ -216,7 +233,7 @@ export class WhatsAppGateway {
     }
 
     this.logger.info(
-      { jid, replyJids, text, fromMe: isFromMe },
+      { jid, replyJids, text, agentText, fromMe: isFromMe },
       "received inbound WhatsApp message",
     );
 
@@ -228,7 +245,7 @@ export class WhatsAppGateway {
       const reply = await this.soulBridge.handleInbound({
         channel: "whatsapp",
         sender_jid: jid,
-        text,
+        text: agentText,
         message_id: message?.key?.id || "",
         push_name: message?.pushName || "",
       });
