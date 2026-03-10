@@ -69,7 +69,16 @@ export function loadConfig() {
     allowGroups: parseBoolean(process.env.SOUL_GATEWAY_ALLOW_GROUPS, false),
     allowFromMe: parseBoolean(process.env.SOUL_GATEWAY_ALLOW_FROM_ME, false),
     autoReply: parseBoolean(process.env.SOUL_GATEWAY_AUTO_REPLY, true),
+    freshStartOnBoot: parseBoolean(process.env.SOUL_GATEWAY_FRESH_START_ON_BOOT, true),
+    clearAuthSessionsOnBoot: parseBoolean(process.env.SOUL_GATEWAY_CLEAR_AUTH_SESSIONS_ON_BOOT, false),
     outboxPollMs: Number.parseInt(process.env.SOUL_GATEWAY_OUTBOX_POLL_MS || "5000", 10),
+    pairingGraceMs: Number.parseInt(process.env.SOUL_GATEWAY_PAIRING_GRACE_MS || "30000", 10),
+    startupWarmupMs: Number.parseInt(
+      process.env.SOUL_GATEWAY_STARTUP_IGNORE_ALL_MESSAGES_MS
+        || process.env.SOUL_GATEWAY_STARTUP_IGNORE_FROM_ME_MS
+        || "30000",
+      10,
+    ),
     markRead: parseBoolean(process.env.SOUL_GATEWAY_MARK_READ, true),
     pairingPhone: normalizePhone(process.env.SOUL_GATEWAY_PAIRING_PHONE || ""),
     allowedFrom: parseList(process.env.SOUL_GATEWAY_ALLOWED_FROM).map(normalizeJid).filter(Boolean),

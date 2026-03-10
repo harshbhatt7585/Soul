@@ -1,16 +1,11 @@
 import fs from "node:fs/promises";
 
-import makeWASocket, {
-  Browsers,
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  useMultiFileAuthState,
-} from "@whiskeysockets/baileys";
+import { DisconnectReason } from "@whiskeysockets/baileys";
 import P from "pino";
-import qrcode from "qrcode-terminal";
 
 import { extractMessageText, isGroupJid, isStatusJid, normalizeSenderJid } from "./message.js";
 import { OutboxProcessor } from "./outbox.js";
+import { createWaSocket, formatError, getStatusCode } from "./session.js";
 import { SoulBridge } from "./soul-bridge.js";
 
 function extractTriggerPrompt(text) {
@@ -23,6 +18,48 @@ function extractTriggerPrompt(text) {
     return "";
   }
   return (match[1] || "").trim();
+}
+
+function parseTimestampMs(value) {
+  if (value == null) {
+    return 0;
+  }
+  if (typeof value === "number") {
+    return value > 1_000_000_000_000 ? value : value * 1000;
+  }
+  if (typeof value === "bigint") {
+    return Number(value > 1_000_000_000_000n ? value : value * 1000n);
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parseTimestampMs(parsed) : 0;
+  }
+  if (typeof value === "object" && value !== null) {
+    if (typeof value.low === "number") {
+      return parseTimestampMs(value.low);
+    }
+    if (typeof value.toNumber === "function") {
+      return parseTimestampMs(value.toNumber());
+    }
+  }
+  return 0;
+}
+
+function jidToPhone(jid) {
+  if (!jid) {
+    return "";
+  }
+  const user = String(jid).trim().split("@")[0] || "";
+  const bare = user.split(":")[0] || user;
+  return bare.replace(/\D+/g, "");
+}
+
+function isSelfChatMode(selfPhone, allowedFrom, allowFromMe) {
+  if (!selfPhone) {
+    return Boolean(allowFromMe);
+  }
+  const normalized = (allowedFrom ?? []).map(jidToPhone).filter(Boolean);
+  return normalized.includes(selfPhone) || Boolean(allowFromMe);
 }
 
 export class WhatsAppGateway {
@@ -41,6 +78,7 @@ export class WhatsAppGateway {
     this.outboxTimer = null;
     this.reconnectAttempts = 0;
     this.reconnectTimer = null;
+    this.connectedAtMs = 0;
     this.stopped = false;
   }
 
@@ -63,12 +101,13 @@ export class WhatsAppGateway {
     }
     if (this.sock) {
       try {
-        this.sock.end(undefined);
+        this.sock.ws?.close();
       } catch {
         // best-effort shutdown
       }
       this.sock = null;
     }
+    this.connectedAtMs = 0;
   }
 
   async _ensureDirs() {
@@ -83,36 +122,15 @@ export class WhatsAppGateway {
     if (this.stopped) {
       return;
     }
-    const { state, saveCreds } = await useMultiFileAuthState(this.config.authDir);
-    const { version, isLatest } = await fetchLatestBaileysVersion().catch((error) => {
-      this.logger.warn({ error }, "failed to fetch latest Baileys version, using bundled default");
-      return { version: undefined, isLatest: false };
-    });
-    const sock = makeWASocket({
-      auth: state,
-      browser: Browsers.macOS("Chrome"),
+    const { sock } = await createWaSocket({
+      authDir: this.config.authDir,
       logger: this.logger,
-      markOnlineOnConnect: false,
-      syncFullHistory: false,
-      shouldSyncHistoryMessage: () => false,
-      ...(version ? { version } : {}),
+      printQr: false,
     });
 
-    if (version) {
-      this.logger.info({ version, isLatest }, "using WhatsApp Web version");
-    }
-
-    sock.ev.on("creds.update", saveCreds);
     sock.ev.on("connection.update", (update) => this._handleConnectionUpdate(update));
     sock.ev.on("messages.upsert", (event) => this._handleMessages(event));
-
     this.sock = sock;
-
-    if (this.config.pairingPhone && !state.creds.registered) {
-      this._requestPairingCode(sock).catch((error) => {
-        this.logger.error({ error }, "failed to request pairing code");
-      });
-    }
   }
 
   _startOutboxLoop() {
@@ -130,14 +148,11 @@ export class WhatsAppGateway {
   }
 
   async _handleConnectionUpdate(update) {
-    const { connection, lastDisconnect, qr } = update;
-    if (qr) {
-      qrcode.generate(qr, { small: true });
-      this.logger.info("scan the QR code above to link WhatsApp");
-    }
+    const { connection, lastDisconnect } = update;
 
     if (connection === "open") {
       this.reconnectAttempts = 0;
+      this.connectedAtMs = Date.now();
       this.logger.info("WhatsApp gateway connected");
       return;
     }
@@ -146,9 +161,9 @@ export class WhatsAppGateway {
       return;
     }
 
-    const statusCode = lastDisconnect?.error?.output?.statusCode;
+    const statusCode = getStatusCode(lastDisconnect?.error);
     if (statusCode === DisconnectReason.loggedOut) {
-      this.logger.error("WhatsApp session logged out; remove auth files and relink");
+      this.logger.error("WhatsApp session logged out; run the login flow again");
       return;
     }
     if (statusCode === DisconnectReason.connectionReplaced) {
@@ -159,7 +174,7 @@ export class WhatsAppGateway {
 
     const delayMs = Math.min(1000 * (2 ** this.reconnectAttempts), 30000);
     this.reconnectAttempts += 1;
-    this.logger.warn({ statusCode, delayMs }, "WhatsApp connection closed, reconnecting");
+    this.logger.warn({ statusCode, delayMs, error: formatError(lastDisconnect?.error) }, "WhatsApp connection closed, reconnecting");
     this._scheduleReconnect(delayMs);
   }
 
@@ -177,16 +192,9 @@ export class WhatsAppGateway {
     }, delayMs);
   }
 
-  async _requestPairingCode(sock) {
-    if (!this.config.pairingPhone) {
-      return;
-    }
-    const code = await sock.requestPairingCode(this.config.pairingPhone);
-    this.logger.info({ code }, "use this pairing code in WhatsApp linked devices");
-  }
-
   async _handleMessages(event) {
-    if (event?.type !== "notify" || !Array.isArray(event.messages)) {
+    const eventType = event?.type;
+    if ((eventType !== "notify" && eventType !== "append") || !Array.isArray(event.messages)) {
       return;
     }
 
@@ -196,18 +204,13 @@ export class WhatsAppGateway {
   }
 
   async _handleMessage(message) {
-    const jid = normalizeSenderJid(message?.key?.remoteJid || "");
-    if (!jid || isStatusJid(jid)) {
+    const chatJid = normalizeSenderJid(message?.key?.remoteJid || "");
+    if (!chatJid || isStatusJid(chatJid)) {
       return;
     }
-    if (!this.config.allowGroups && isGroupJid(jid)) {
-      return;
-    }
-    if (message?.key?.fromMe && !this.config.allowFromMe) {
-      return;
-    }
-    if (this.config.allowedFrom.length > 0 && !this.config.allowedFrom.includes(jid)) {
-      this.logger.info({ jid }, "ignored message from non-allowlisted sender");
+
+    const isGroup = isGroupJid(chatJid);
+    if (!this.config.allowGroups && isGroup) {
       return;
     }
 
@@ -215,25 +218,77 @@ export class WhatsAppGateway {
     if (!text) {
       return;
     }
+
+    if (
+      this.connectedAtMs
+      && Date.now() - this.connectedAtMs < this.config.startupWarmupMs
+    ) {
+      this.logger.info(
+        {
+          chatJid,
+          startupWarmupMs: this.config.startupWarmupMs,
+          connectedAtMs: this.connectedAtMs,
+        },
+        "ignored message during startup warmup",
+      );
+      return;
+    }
+
     const isFromMe = Boolean(message?.key?.fromMe);
+    const senderJid = normalizeSenderJid(message?.key?.participant || chatJid);
+    const senderPhone = jidToPhone(isGroup ? senderJid : chatJid);
+    const selfPhone = jidToPhone(this.sock?.user?.id || "");
+    const selfChatEnabled = isSelfChatMode(selfPhone, this.config.allowedFrom, this.config.allowFromMe);
+    const isSelfChat = Boolean(
+      (selfChatEnabled && senderPhone && selfPhone && senderPhone === selfPhone)
+      || (this.config.allowFromMe && isFromMe),
+    );
+
+    if (isFromMe && !isSelfChat) {
+      this.logger.info({ chatJid, senderJid }, "ignored outbound message outside self-chat mode");
+      return;
+    }
+
+    const allowlistedPhones = this.config.allowedFrom.map(jidToPhone).filter(Boolean);
+    if (allowlistedPhones.length > 0 && !allowlistedPhones.includes(senderPhone) && !isSelfChat) {
+      this.logger.info({ chatJid, senderJid }, "ignored message from non-allowlisted sender");
+      return;
+    }
+
+    const messageTimestampMs = parseTimestampMs(message?.messageTimestamp);
+    if (
+      messageTimestampMs
+      && this.connectedAtMs
+      && messageTimestampMs < this.connectedAtMs - this.config.pairingGraceMs
+    ) {
+      this.logger.info(
+        { chatJid, text, fromMe: isFromMe, messageTimestampMs, connectedAtMs: this.connectedAtMs },
+        "ignored pending message from before current gateway session",
+      );
+      return;
+    }
+
     const agentText = extractTriggerPrompt(text);
     if (!agentText) {
-      this.logger.info({ jid, text, fromMe: isFromMe }, "ignored message without SOUL prefix");
+      this.logger.info({ chatJid, text, fromMe: isFromMe }, "ignored message without SOUL prefix");
       return;
     }
 
-    if (this.config.markRead && message?.key && this.sock) {
-      await this.sock.readMessages([message.key]);
-    }
-
-    const replyJids = this._getReplyJids(message, jid);
-    if (replyJids.length === 0) {
-      this.logger.warn({ jid }, "could not determine reply jid for inbound message");
-      return;
+    if (this.config.markRead && message?.key && this.sock && !isSelfChat && !isFromMe) {
+      try {
+        await this.sock.readMessages([{
+          remoteJid: chatJid,
+          id: message.key.id,
+          participant: message.key.participant,
+          fromMe: false,
+        }]);
+      } catch (error) {
+        this.logger.warn({ error: String(error), chatJid }, "failed to mark WhatsApp message as read");
+      }
     }
 
     this.logger.info(
-      { jid, replyJids, text, agentText, fromMe: isFromMe },
+      { chatJid, senderJid, text, agentText, fromMe: isFromMe, isSelfChat },
       "received inbound WhatsApp message",
     );
 
@@ -241,10 +296,11 @@ export class WhatsAppGateway {
       return;
     }
 
+    const targetJid = chatJid;
     try {
       const reply = await this.soulBridge.handleInbound({
         channel: "whatsapp",
-        sender_jid: jid,
+        sender_jid: senderJid || chatJid,
         text: agentText,
         message_id: message?.key?.id || "",
         push_name: message?.pushName || "",
@@ -252,38 +308,18 @@ export class WhatsAppGateway {
 
       const replyText = typeof reply?.reply === "string" ? reply.reply.trim() : "";
       if (!replyText) {
-        this.logger.warn({ jid }, "Soul bridge returned no reply text");
+        this.logger.warn({ chatJid }, "Soul bridge returned no reply text");
         return;
       }
 
-      const sent = [];
-      for (const replyJid of replyJids) {
-        await this.sock.sendPresenceUpdate("composing", replyJid);
-        const result = await this.sock.sendMessage(replyJid, { text: replyText });
-        sent.push({
-          replyJid,
-          messageId: result?.key?.id || "",
-        });
-      }
-      this.logger.info({ jid, replyJids, replyText, sent }, "sent WhatsApp reply");
+      await this.sock.sendPresenceUpdate("composing", targetJid);
+      const result = await this.sock.sendMessage(targetJid, { text: replyText });
+      this.logger.info(
+        { chatJid, targetJid, replyText, messageId: result?.key?.id || "" },
+        "sent WhatsApp reply",
+      );
     } catch (error) {
-      this.logger.error({ error, jid }, "failed to handle inbound WhatsApp message");
+      this.logger.error({ error, chatJid }, "failed to handle inbound WhatsApp message");
     }
-  }
-
-  _getReplyJids(message, inboundJid) {
-    if (!message?.key?.fromMe) {
-      return inboundJid ? [inboundJid] : [];
-    }
-    const ownId = this.sock?.user?.id || "";
-    const ownNumber = String(ownId).split(":")[0].replace(/\D+/g, "");
-    const targets = [];
-    if (ownNumber) {
-      targets.push(`${ownNumber}@s.whatsapp.net`);
-    }
-    if (inboundJid && !targets.includes(inboundJid)) {
-      targets.push(inboundJid);
-    }
-    return targets;
   }
 }

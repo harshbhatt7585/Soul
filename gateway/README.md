@@ -37,15 +37,23 @@ cd gateway
 npm install
 ```
 
+## Login
+
+Link WhatsApp once:
+
+```bash
+./scripts/login_whatsapp_gateway.sh
+```
+
+Scan the QR code shown in the terminal. Credentials are stored under `.soul/gateway/auth`.
+
 ## Run
 
-Start the gateway:
+Start the long-lived gateway:
 
 ```bash
 ./scripts/start_whatsapp_gateway.sh
 ```
-
-On first run, scan the QR code shown in the terminal.
 
 To watch persistent logs:
 
@@ -72,8 +80,9 @@ The running gateway daemon will pick it up and send it.
 Environment variables:
 
 - `SOUL_GATEWAY_ALLOWED_FROM`: comma-separated WhatsApp JIDs allowed to message the bot
+- `SOUL_GATEWAY_PAIRING_GRACE_MS`: ignore backlog messages older than the current session start minus this grace window
 - `SOUL_GATEWAY_AUTO_REPLY`: `true` or `false`
-- `SOUL_GATEWAY_ALLOW_FROM_ME`: `true` or `false`; allow self-messages from the linked WhatsApp account for local testing
+- `SOUL_GATEWAY_ALLOW_FROM_ME`: compatibility override for self-chat testing; OpenClaw-style self-chat is normally derived from `SOUL_GATEWAY_ALLOWED_FROM`
 - `SOUL_GATEWAY_ALLOW_GROUPS`: `true` or `false`
 - `SOUL_GATEWAY_OUTBOX_POLL_MS`: outbound polling interval
 - `SOUL_GATEWAY_PAIRING_PHONE`: optional phone number for pairing-code login without QR
@@ -87,3 +96,4 @@ Environment variables:
 - The gateway should run as a long-lived process. Use `pm2`, `launchd`, `systemd`, or another daemon manager in practice.
 - Cron should enqueue outbound work, not restart the WhatsApp socket every minute.
 - Only one Soul gateway process should run at a time. A second start will now fail fast instead of replacing the active session.
+- The gateway now follows the OpenClaw split more closely: QR linking is a separate login step, and the daemon only owns the long-lived listener.

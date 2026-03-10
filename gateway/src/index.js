@@ -1,11 +1,15 @@
 import { loadConfig } from "./config.js";
+import { prepareFreshStart } from "./fresh-start.js";
 import { ProcessLock } from "./process-lock.js";
 import { WhatsAppGateway } from "./whatsapp-gateway.js";
+import P from "pino";
 
 async function main() {
   const config = loadConfig();
+  const logger = P({ level: "info" });
   const lock = new ProcessLock(config.lockFile);
   await lock.acquire();
+  await prepareFreshStart(config, logger);
   const gateway = new WhatsAppGateway(config);
 
   let shuttingDown = false;
