@@ -2,14 +2,19 @@ import fs from "node:fs/promises";
 
 import { DisconnectReason } from "@whiskeysockets/baileys";
 import P from "pino";
+import WebSocket from "ws";
 
-import { extractMessageText, isGroupJid, isStatusJid, normalizeSenderJid } from "./message.js";
+import {
+  extractMessageText,
+  isGroupJid,
+  isStatusJid,
+  normalizeSenderJid,
+} from "./message.js";
 import { OutboxProcessor } from "./outbox.js";
 import { ProcessedMessageStore } from "./processed-message-store.js";
 import { createWaSocket, formatError, getStatusCode } from "./session.js";
-import { SoulBridge } from "./soul-bridge.js";
 
-function extractTriggerPrompt(text) {
+function extractSelfTriggerPrompt(text) {
   const trimmed = typeof text === "string" ? text.trim() : "";
   if (!trimmed) {
     return "";
@@ -50,17 +55,8 @@ function jidToPhone(jid) {
   if (!jid) {
     return "";
   }
-  const user = String(jid).trim().split("@")[0] || "";
-  const bare = user.split(":")[0] || user;
-  return bare.replace(/\D+/g, "");
-}
-
-function isSelfChatMode(selfPhone, allowedFrom, allowFromMe) {
-  if (!selfPhone) {
-    return Boolean(allowFromMe);
-  }
-  const normalized = (allowedFrom ?? []).map(jidToPhone).filter(Boolean);
-  return normalized.includes(selfPhone) || Boolean(allowFromMe);
+  const user = String(jid).trim().split("@")[0] ?? "";
+  return user.split(":")[0].replace(/\D+/g, "");
 }
 
 function buildHandledMessageKey(message, chatJid) {
@@ -68,13 +64,103 @@ function buildHandledMessageKey(message, chatJid) {
   if (!chatJid || !messageId) {
     return "";
   }
-  const participant = normalizeSenderJid(message?.key?.participant || "");
+  const participant = normalizeSenderJid(message?.key?.participant ?? "");
   const fromMe = message?.key?.fromMe ? "me" : "them";
   return [chatJid, participant || "-", fromMe, messageId].join("|");
 }
 
-function buildReplyTargetJids({ chatJid }) {
-  return chatJid ? [chatJid] : [];
+class ControlPlaneClient {
+  constructor({ wsUrl, wsSecret, logger }) {
+    this.wsUrl = wsUrl;
+    this.wsSecret = wsSecret;
+    this.logger = logger;
+    this.ws = null;
+    this.ready = false;
+    this.pending = new Map();
+    this.reconnectTimer = null;
+  }
+
+  connect() {
+    this.ws = new WebSocket(this.wsUrl);
+
+    this.ws.on("open", () => {
+      if (this.wsSecret) {
+        this.ws.send(JSON.stringify({ type: "auth", secret: this.wsSecret }));
+      }
+    });
+
+    this.ws.on("message", (raw) => {
+      let frame;
+      try {
+        frame = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+
+      if (frame.type === "auth_ok") {
+        this.ready = true;
+        this.logger.info("Connected to gateway control plane");
+        return;
+      }
+      if (frame.type === "pong") {
+        return;
+      }
+      if ((frame.type === "reply" || frame.type === "error") && frame.message_id) {
+        const pending = this.pending.get(frame.message_id);
+        if (!pending) {
+          return;
+        }
+        this.pending.delete(frame.message_id);
+        if (frame.type === "reply") {
+          pending.resolve(frame.text ?? "");
+        } else {
+          pending.reject(new Error(frame.error || "control plane error"));
+        }
+      }
+    });
+
+    this.ws.on("close", () => {
+      this.ready = false;
+      this.logger.warn("Control plane connection closed, reconnecting in 5s");
+      this.reconnectTimer = setTimeout(() => this.connect(), 5000);
+    });
+
+    this.ws.on("error", (error) => {
+      this.logger.error({ error }, "Control plane WS error");
+    });
+  }
+
+  disconnect() {
+    clearTimeout(this.reconnectTimer);
+    this.ws?.close();
+  }
+
+  sendInbound(frame) {
+    return new Promise((resolve, reject) => {
+      if (!this.ready || !this.ws) {
+        reject(new Error("Control plane not connected"));
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        this.pending.delete(frame.message_id);
+        reject(new Error("Control plane reply timeout"));
+      }, 120_000);
+
+      this.pending.set(frame.message_id, {
+        resolve: (text) => {
+          clearTimeout(timeout);
+          resolve(text);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
+
+      this.ws.send(JSON.stringify({ type: "inbound", ...frame }));
+    });
+  }
 }
 
 export class WhatsAppGateway {
@@ -89,7 +175,6 @@ export class WhatsAppGateway {
     );
     this.sock = null;
     this.outboxProcessor = new OutboxProcessor(config, this.logger);
-    this.soulBridge = new SoulBridge(config, this.logger);
     this.outboxTimer = null;
     this.reconnectAttempts = 0;
     this.reconnectTimer = null;
@@ -102,34 +187,35 @@ export class WhatsAppGateway {
       maxEntries: this.config.processedMessagesMaxEntries,
     });
     this.stopped = false;
+    this.controlPlane = new ControlPlaneClient({
+      wsUrl: this.config.controlPlaneUrl,
+      wsSecret: this.config.controlPlaneSecret,
+      logger: this.logger,
+    });
   }
 
   async start() {
     this.stopped = false;
     await this._ensureDirs();
     await this.processedMessageStore.load();
+    this.controlPlane.connect();
     await this._connect();
     this._startOutboxLoop();
   }
 
   async stop() {
     this.stopped = true;
-    if (this.outboxTimer) {
-      clearInterval(this.outboxTimer);
-      this.outboxTimer = null;
+    clearInterval(this.outboxTimer);
+    this.outboxTimer = null;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.controlPlane.disconnect();
+    try {
+      this.sock?.ws?.close();
+    } catch {
+      // best-effort
     }
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    if (this.sock) {
-      try {
-        this.sock.ws?.close();
-      } catch {
-        // best-effort shutdown
-      }
-      this.sock = null;
-    }
+    this.sock = null;
     this.connectedAtMs = 0;
     this.processingMessageKeys.clear();
     await this.processedMessageStore.close();
@@ -152,16 +238,13 @@ export class WhatsAppGateway {
       logger: this.logger,
       printQr: false,
     });
-
     sock.ev.on("connection.update", (update) => this._handleConnectionUpdate(update));
     sock.ev.on("messages.upsert", (event) => this._handleMessages(event));
     this.sock = sock;
   }
 
   _startOutboxLoop() {
-    if (this.outboxTimer) {
-      clearInterval(this.outboxTimer);
-    }
+    clearInterval(this.outboxTimer);
     this.outboxTimer = setInterval(() => {
       if (!this.sock) {
         return;
@@ -172,34 +255,31 @@ export class WhatsAppGateway {
     }, this.config.outboxPollMs);
   }
 
-  async _handleConnectionUpdate(update) {
-    const { connection, lastDisconnect } = update;
-
+  async _handleConnectionUpdate({ connection, lastDisconnect }) {
     if (connection === "open") {
       this.reconnectAttempts = 0;
       this.connectedAtMs = Date.now();
       this.logger.info("WhatsApp gateway connected");
       return;
     }
-
     if (connection !== "close") {
       return;
     }
 
     const statusCode = getStatusCode(lastDisconnect?.error);
     if (statusCode === DisconnectReason.loggedOut) {
-      this.logger.error("WhatsApp session logged out; run the login flow again");
+      this.logger.error("WhatsApp session logged out; re-run the login flow");
       return;
     }
     if (statusCode === DisconnectReason.connectionReplaced) {
-      this.logger.error("WhatsApp connection was replaced by another active session; stopping gateway");
+      this.logger.error("Session replaced; stopping gateway");
       await this.stop();
       return;
     }
 
-    const delayMs = Math.min(1000 * (2 ** this.reconnectAttempts), 30000);
+    const delayMs = Math.min(1000 * (2 ** this.reconnectAttempts), 30_000);
     this.reconnectAttempts += 1;
-    this.logger.warn({ statusCode, delayMs, error: formatError(lastDisconnect?.error) }, "WhatsApp connection closed, reconnecting");
+    this.logger.warn({ statusCode, delayMs, error: formatError(lastDisconnect?.error) }, "WhatsApp closed, reconnecting");
     this._scheduleReconnect(delayMs);
   }
 
@@ -207,33 +287,31 @@ export class WhatsAppGateway {
     if (this.stopped) {
       return;
     }
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-    }
+    clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => {
       this._connect().catch((error) => {
-        this.logger.error({ error }, "failed to reconnect WhatsApp gateway");
+        this.logger.error({ error }, "reconnect failed");
       });
     }, delayMs);
   }
 
   async _handleMessages(event) {
-    const eventType = event?.type;
-    if ((eventType !== "notify" && eventType !== "append") || !Array.isArray(event.messages)) {
+    const { type: eventType, messages } = event;
+    if (!["notify", "append"].includes(eventType) || !Array.isArray(messages)) {
       return;
     }
     if (eventType === "append" && !this.config.processAppendMessages) {
-      this.logger.info({ messageCount: event.messages.length }, "ignored append WhatsApp message batch");
+      this.logger.info({ messageCount: messages.length }, "ignored append WhatsApp message batch");
       return;
     }
 
-    for (const message of event.messages) {
+    for (const message of messages) {
       await this._handleMessage(message, eventType);
     }
   }
 
   async _handleMessage(message, eventType) {
-    const chatJid = normalizeSenderJid(message?.key?.remoteJid || "");
+    const chatJid = normalizeSenderJid(message?.key?.remoteJid ?? "");
     if (!chatJid || isStatusJid(chatJid)) {
       return;
     }
@@ -243,45 +321,33 @@ export class WhatsAppGateway {
       return;
     }
 
-    const text = extractMessageText(message);
-    if (!text) {
+    const rawText = extractMessageText(message);
+    if (!rawText) {
       return;
     }
 
-    if (
-      this.connectedAtMs
-      && Date.now() - this.connectedAtMs < this.config.startupWarmupMs
-    ) {
-      this.logger.info(
-        {
-          chatJid,
-          startupWarmupMs: this.config.startupWarmupMs,
-          connectedAtMs: this.connectedAtMs,
-        },
-        "ignored message during startup warmup",
-      );
+    if (this.connectedAtMs && Date.now() - this.connectedAtMs < this.config.startupWarmupMs) {
+      this.logger.info({ chatJid, startupWarmupMs: this.config.startupWarmupMs }, "ignored message during startup warmup");
       return;
     }
 
     const isFromMe = Boolean(message?.key?.fromMe);
-    const senderJid = normalizeSenderJid(message?.key?.participant || chatJid);
+    const senderJid = normalizeSenderJid(message?.key?.participant ?? chatJid);
     const senderPhone = jidToPhone(isGroup ? senderJid : chatJid);
-    const selfPhone = jidToPhone(this.sock?.user?.id || "");
-    const selfChatEnabled = isSelfChatMode(selfPhone, this.config.allowedFrom, this.config.allowFromMe);
-    const isSelfChat = Boolean(
-      (selfChatEnabled && senderPhone && selfPhone && senderPhone === selfPhone)
-      || (this.config.allowFromMe && isFromMe),
-    );
+    let text = rawText;
+    let forceRespond = false;
 
-    if (isFromMe && !isSelfChat) {
-      this.logger.info({ chatJid, senderJid }, "ignored outbound message outside self-chat mode");
-      return;
-    }
-
-    const allowlistedPhones = this.config.allowedFrom.map(jidToPhone).filter(Boolean);
-    if (allowlistedPhones.length > 0 && !allowlistedPhones.includes(senderPhone) && !isSelfChat) {
-      this.logger.info({ chatJid, senderJid }, "ignored message from non-allowlisted sender");
-      return;
+    if (isFromMe) {
+      if (!this.config.allowFromMe) {
+        this.logger.info({ chatJid, senderJid }, "ignored outbound message outside self-chat mode");
+        return;
+      }
+      text = extractSelfTriggerPrompt(rawText);
+      if (!text) {
+        this.logger.info({ chatJid, text: rawText, fromMe: true }, "ignored self message without SOUL prefix");
+        return;
+      }
+      forceRespond = true;
     }
 
     const messageTimestampMs = parseTimestampMs(message?.messageTimestamp);
@@ -290,16 +356,7 @@ export class WhatsAppGateway {
       && this.connectedAtMs
       && messageTimestampMs < this.connectedAtMs - this.config.pairingGraceMs
     ) {
-      this.logger.info(
-        { chatJid, text, fromMe: isFromMe, messageTimestampMs, connectedAtMs: this.connectedAtMs },
-        "ignored pending message from before current gateway session",
-      );
-      return;
-    }
-
-    const agentText = extractTriggerPrompt(text);
-    if (!agentText) {
-      this.logger.info({ chatJid, text, fromMe: isFromMe }, "ignored message without SOUL prefix");
+      this.logger.info({ chatJid, text: rawText, fromMe: isFromMe, messageTimestampMs, connectedAtMs: this.connectedAtMs }, "ignored pending message from before current gateway session");
       return;
     }
 
@@ -313,73 +370,64 @@ export class WhatsAppGateway {
       return;
     }
 
-    if (this.config.markRead && message?.key && this.sock && !isSelfChat && !isFromMe) {
-      try {
-        await this.sock.readMessages([{
-          remoteJid: chatJid,
-          id: message.key.id,
-          participant: message.key.participant,
-          fromMe: false,
-        }]);
-      } catch (error) {
-        this.logger.warn({ error: String(error), chatJid }, "failed to mark WhatsApp message as read");
-      }
+    if (this.config.markRead && message?.key && this.sock && !isGroup && !isFromMe) {
+      this.sock.readMessages([{
+        remoteJid: chatJid,
+        id: message.key.id,
+        participant: message.key.participant,
+        fromMe: false,
+      }]).catch((error) => {
+        this.logger.warn({ error }, "failed to mark read");
+      });
     }
 
-    this.logger.info(
-      { chatJid, senderJid, text, agentText, fromMe: isFromMe, isSelfChat },
-      "received inbound WhatsApp message",
-    );
+    this.logger.info({ chatJid, senderJid, text, rawText, isFromMe, isGroup, forceRespond }, "received WhatsApp message");
+
+    if (!this.config.autoReply || !this.sock) {
+      return;
+    }
 
     if (handledMessageKey) {
       this.processingMessageKeys.add(handledMessageKey);
-      try {
-        await this.processedMessageStore.mark(handledMessageKey);
-      } catch (error) {
-        this.logger.warn(
-          { error: String(error), chatJid, handledMessageKey },
-          "failed to persist handled WhatsApp message key",
-        );
-      }
     }
 
     try {
-      if (!this.config.autoReply || !this.sock) {
-        return;
-      }
+      const quotedParticipant = message?.message?.extendedTextMessage?.contextInfo?.participant ?? "";
+      const selfJid = this.sock.user?.id ?? "";
+      const quotedFromMe = Boolean(
+        quotedParticipant
+        && normalizeSenderJid(quotedParticipant) === normalizeSenderJid(selfJid),
+      );
 
-      const targetJids = buildReplyTargetJids({ chatJid });
-      if (targetJids.length === 0) {
-        this.logger.warn({ chatJid, selfPhone, isSelfChat }, "could not determine WhatsApp reply target");
-        return;
-      }
-
-      const reply = await this.soulBridge.handleInbound({
+      const replyText = await this.controlPlane.sendInbound({
         channel: "whatsapp",
-        sender_jid: senderJid || chatJid,
-        text: agentText,
-        message_id: message?.key?.id || "",
-        push_name: message?.pushName || "",
+        chat_jid: chatJid,
+        sender_jid: senderJid,
+        sender_phone: senderPhone,
+        text,
+        message_id: message?.key?.id ?? "",
+        push_name: message?.pushName ?? "",
+        is_group: isGroup,
+        quoted_from_me: quotedFromMe,
+        force_respond: forceRespond,
       });
 
-      const replyText = typeof reply?.reply === "string" ? reply.reply.trim() : "";
-      if (!replyText) {
-        this.logger.warn({ chatJid }, "Soul bridge returned no reply text");
+      if (!replyText?.trim()) {
+        if (handledMessageKey) {
+          await this.processedMessageStore.mark(handledMessageKey);
+        }
+        this.logger.info({ chatJid, eventType, handledMessageKey }, "no reply produced for WhatsApp message");
         return;
       }
 
-      const sent = [];
-      for (const targetJid of targetJids) {
-        await this.sock.sendPresenceUpdate("composing", targetJid);
-        const result = await this.sock.sendMessage(targetJid, { text: replyText });
-        sent.push({ targetJid, messageId: result?.key?.id || "" });
+      await this.sock.sendPresenceUpdate("composing", chatJid);
+      const result = await this.sock.sendMessage(chatJid, { text: replyText });
+      if (handledMessageKey) {
+        await this.processedMessageStore.mark(handledMessageKey);
       }
-      this.logger.info(
-        { chatJid, targetJids, replyText, sent, isSelfChat },
-        "sent WhatsApp reply",
-      );
+      this.logger.info({ chatJid, messageId: result?.key?.id, replyText }, "sent WhatsApp reply");
     } catch (error) {
-      this.logger.error({ error, chatJid }, "failed to handle inbound WhatsApp message");
+      this.logger.error({ error, chatJid }, "failed to handle inbound message");
     } finally {
       if (handledMessageKey) {
         this.processingMessageKeys.delete(handledMessageKey);
