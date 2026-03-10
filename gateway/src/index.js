@@ -1,15 +1,39 @@
+import P from "pino";
+
+import { AgentRuntime } from "./agent-runtime.js";
 import { loadConfig } from "./config.js";
 import { prepareFreshStart } from "./fresh-start.js";
+import { GatewayControlPlane } from "./gateway-control-plane.js";
 import { ProcessLock } from "./process-lock.js";
+import { SessionManager } from "./session-manager.js";
 import { WhatsAppGateway } from "./whatsapp-gateway.js";
-import P from "pino";
 
 async function main() {
   const config = loadConfig();
-  const logger = P({ level: "info" });
+  const logger = P({ level: process.env.LOG_LEVEL ?? "info" });
   const lock = new ProcessLock(config.lockFile);
   await lock.acquire();
   await prepareFreshStart(config, logger);
+
+  const sessionManager = new SessionManager(
+    {
+      dmPolicy: config.dmPolicy,
+      allowedFrom: config.allowedFrom,
+      mentionPatterns: config.mentionPatterns,
+      botName: config.botName,
+      sessionTtlMs: config.sessionTtlMs,
+    },
+    logger,
+  );
+  const agentRuntime = new AgentRuntime(config, logger);
+  const controlPlane = new GatewayControlPlane(
+    { wsPort: config.wsPort, wsSecret: config.wsSecret },
+    sessionManager,
+    agentRuntime,
+    logger,
+  );
+  controlPlane.start();
+
   const gateway = new WhatsAppGateway(config);
 
   let shuttingDown = false;
@@ -21,6 +45,8 @@ async function main() {
     try {
       await gateway.stop();
     } finally {
+      sessionManager.stop();
+      controlPlane.stop();
       await lock.release();
     }
     process.exitCode = exitCode;
