@@ -53,7 +53,7 @@ export class WhatsAppGateway {
     });
     const sock = makeWASocket({
       auth: state,
-      browser: Browsers.ubuntu("Soul"),
+      browser: Browsers.macOS("Chrome"),
       printQRInTerminal: true,
       logger: this.logger,
       markOnlineOnConnect: false,
