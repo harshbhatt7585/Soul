@@ -5,6 +5,7 @@ import P from "pino";
 
 import { extractMessageText, isGroupJid, isStatusJid, normalizeSenderJid } from "./message.js";
 import { OutboxProcessor } from "./outbox.js";
+import { ProcessedMessageStore } from "./processed-message-store.js";
 import { createWaSocket, formatError, getStatusCode } from "./session.js";
 import { SoulBridge } from "./soul-bridge.js";
 
@@ -62,6 +63,16 @@ function isSelfChatMode(selfPhone, allowedFrom, allowFromMe) {
   return normalized.includes(selfPhone) || Boolean(allowFromMe);
 }
 
+function buildHandledMessageKey(message, chatJid) {
+  const messageId = typeof message?.key?.id === "string" ? message.key.id.trim() : "";
+  if (!chatJid || !messageId) {
+    return "";
+  }
+  const participant = normalizeSenderJid(message?.key?.participant || "");
+  const fromMe = message?.key?.fromMe ? "me" : "them";
+  return [chatJid, participant || "-", fromMe, messageId].join("|");
+}
+
 export class WhatsAppGateway {
   constructor(config) {
     this.config = config;
@@ -79,12 +90,20 @@ export class WhatsAppGateway {
     this.reconnectAttempts = 0;
     this.reconnectTimer = null;
     this.connectedAtMs = 0;
+    this.processingMessageKeys = new Set();
+    this.processedMessageStore = new ProcessedMessageStore({
+      filePath: this.config.processedMessagesFile,
+      logger: this.logger,
+      ttlMs: this.config.processedMessagesTtlMs,
+      maxEntries: this.config.processedMessagesMaxEntries,
+    });
     this.stopped = false;
   }
 
   async start() {
     this.stopped = false;
     await this._ensureDirs();
+    await this.processedMessageStore.load();
     await this._connect();
     this._startOutboxLoop();
   }
@@ -108,6 +127,8 @@ export class WhatsAppGateway {
       this.sock = null;
     }
     this.connectedAtMs = 0;
+    this.processingMessageKeys.clear();
+    await this.processedMessageStore.close();
   }
 
   async _ensureDirs() {
@@ -197,13 +218,17 @@ export class WhatsAppGateway {
     if ((eventType !== "notify" && eventType !== "append") || !Array.isArray(event.messages)) {
       return;
     }
+    if (eventType === "append" && !this.config.processAppendMessages) {
+      this.logger.info({ messageCount: event.messages.length }, "ignored append WhatsApp message batch");
+      return;
+    }
 
     for (const message of event.messages) {
-      await this._handleMessage(message);
+      await this._handleMessage(message, eventType);
     }
   }
 
-  async _handleMessage(message) {
+  async _handleMessage(message, eventType) {
     const chatJid = normalizeSenderJid(message?.key?.remoteJid || "");
     if (!chatJid || isStatusJid(chatJid)) {
       return;
@@ -274,6 +299,16 @@ export class WhatsAppGateway {
       return;
     }
 
+    const handledMessageKey = buildHandledMessageKey(message, chatJid);
+    if (handledMessageKey && this.processingMessageKeys.has(handledMessageKey)) {
+      this.logger.info({ chatJid, eventType, handledMessageKey }, "ignored duplicate WhatsApp message already in flight");
+      return;
+    }
+    if (handledMessageKey && this.processedMessageStore.has(handledMessageKey)) {
+      this.logger.info({ chatJid, eventType, handledMessageKey }, "ignored duplicate WhatsApp message already handled");
+      return;
+    }
+
     if (this.config.markRead && message?.key && this.sock && !isSelfChat && !isFromMe) {
       try {
         await this.sock.readMessages([{
@@ -292,12 +327,24 @@ export class WhatsAppGateway {
       "received inbound WhatsApp message",
     );
 
-    if (!this.config.autoReply || !this.sock) {
-      return;
+    if (handledMessageKey) {
+      this.processingMessageKeys.add(handledMessageKey);
+      try {
+        await this.processedMessageStore.mark(handledMessageKey);
+      } catch (error) {
+        this.logger.warn(
+          { error: String(error), chatJid, handledMessageKey },
+          "failed to persist handled WhatsApp message key",
+        );
+      }
     }
 
-    const targetJid = chatJid;
     try {
+      if (!this.config.autoReply || !this.sock) {
+        return;
+      }
+
+      const targetJid = chatJid;
       const reply = await this.soulBridge.handleInbound({
         channel: "whatsapp",
         sender_jid: senderJid || chatJid,
@@ -320,6 +367,10 @@ export class WhatsAppGateway {
       );
     } catch (error) {
       this.logger.error({ error, chatJid }, "failed to handle inbound WhatsApp message");
+    } finally {
+      if (handledMessageKey) {
+        this.processingMessageKeys.delete(handledMessageKey);
+      }
     }
   }
 }

@@ -69,6 +69,7 @@ export function loadConfig() {
     allowGroups: parseBoolean(process.env.SOUL_GATEWAY_ALLOW_GROUPS, false),
     allowFromMe: parseBoolean(process.env.SOUL_GATEWAY_ALLOW_FROM_ME, false),
     autoReply: parseBoolean(process.env.SOUL_GATEWAY_AUTO_REPLY, true),
+    processAppendMessages: parseBoolean(process.env.SOUL_GATEWAY_PROCESS_APPEND_MESSAGES, false),
     freshStartOnBoot: parseBoolean(process.env.SOUL_GATEWAY_FRESH_START_ON_BOOT, true),
     clearAuthSessionsOnBoot: parseBoolean(process.env.SOUL_GATEWAY_CLEAR_AUTH_SESSIONS_ON_BOOT, false),
     outboxPollMs: Number.parseInt(process.env.SOUL_GATEWAY_OUTBOX_POLL_MS || "5000", 10),
@@ -80,6 +81,15 @@ export function loadConfig() {
       10,
     ),
     markRead: parseBoolean(process.env.SOUL_GATEWAY_MARK_READ, true),
+    processedMessagesFile: path.join(gatewayHome, "processed-messages.json"),
+    processedMessagesTtlMs: Number.parseInt(
+      process.env.SOUL_GATEWAY_PROCESSED_MESSAGE_TTL_MS || String(14 * 24 * 60 * 60 * 1000),
+      10,
+    ),
+    processedMessagesMaxEntries: Number.parseInt(
+      process.env.SOUL_GATEWAY_PROCESSED_MESSAGE_MAX_ENTRIES || "5000",
+      10,
+    ),
     pairingPhone: normalizePhone(process.env.SOUL_GATEWAY_PAIRING_PHONE || ""),
     allowedFrom: parseList(process.env.SOUL_GATEWAY_ALLOWED_FROM).map(normalizeJid).filter(Boolean),
     defaultTo: normalizeJid(process.env.SOUL_WHATSAPP_DEFAULT_TO || ""),

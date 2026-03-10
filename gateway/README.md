@@ -83,8 +83,11 @@ Environment variables:
 - `SOUL_GATEWAY_PAIRING_GRACE_MS`: ignore backlog messages older than the current session start minus this grace window
 - `SOUL_GATEWAY_AUTO_REPLY`: `true` or `false`
 - `SOUL_GATEWAY_ALLOW_FROM_ME`: compatibility override for self-chat testing; OpenClaw-style self-chat is normally derived from `SOUL_GATEWAY_ALLOWED_FROM`
+- `SOUL_GATEWAY_PROCESS_APPEND_MESSAGES`: `true` or `false`; defaults to `false` so replayed/offline `append` events do not trigger replies on reconnect
 - `SOUL_GATEWAY_ALLOW_GROUPS`: `true` or `false`
 - `SOUL_GATEWAY_OUTBOX_POLL_MS`: outbound polling interval
+- `SOUL_GATEWAY_PROCESSED_MESSAGE_TTL_MS`: how long handled message IDs stay in the replay-protection cache
+- `SOUL_GATEWAY_PROCESSED_MESSAGE_MAX_ENTRIES`: max handled message IDs kept on disk for replay protection
 - `SOUL_GATEWAY_PAIRING_PHONE`: optional phone number for pairing-code login without QR
 - `SOUL_GATEWAY_PYTHON`: Python executable for the Soul bridge
 - `SOUL_GATEWAY_BRIDGE_SCRIPT`: Python bridge script path

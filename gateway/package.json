@@ -5,7 +5,7 @@
   "scripts": {
     "login": "node src/login.js",
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/login.js && node --check src/config.js && node --check src/message.js && node --check src/outbox.js && node --check src/session.js && node --check src/soul-bridge.js && node --check src/whatsapp-gateway.js"
+    "check": "node --check src/index.js && node --check src/login.js && node --check src/config.js && node --check src/message.js && node --check src/outbox.js && node --check src/processed-message-store.js && node --check src/session.js && node --check src/soul-bridge.js && node --check src/whatsapp-gateway.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.17",
