@@ -73,6 +73,10 @@ function buildHandledMessageKey(message, chatJid) {
   return [chatJid, participant || "-", fromMe, messageId].join("|");
 }
 
+function buildReplyTargetJids({ chatJid }) {
+  return chatJid ? [chatJid] : [];
+}
+
 export class WhatsAppGateway {
   constructor(config) {
     this.config = config;
@@ -344,7 +348,12 @@ export class WhatsAppGateway {
         return;
       }
 
-      const targetJid = chatJid;
+      const targetJids = buildReplyTargetJids({ chatJid });
+      if (targetJids.length === 0) {
+        this.logger.warn({ chatJid, selfPhone, isSelfChat }, "could not determine WhatsApp reply target");
+        return;
+      }
+
       const reply = await this.soulBridge.handleInbound({
         channel: "whatsapp",
         sender_jid: senderJid || chatJid,
@@ -359,10 +368,14 @@ export class WhatsAppGateway {
         return;
       }
 
-      await this.sock.sendPresenceUpdate("composing", targetJid);
-      const result = await this.sock.sendMessage(targetJid, { text: replyText });
+      const sent = [];
+      for (const targetJid of targetJids) {
+        await this.sock.sendPresenceUpdate("composing", targetJid);
+        const result = await this.sock.sendMessage(targetJid, { text: replyText });
+        sent.push({ targetJid, messageId: result?.key?.id || "" });
+      }
       this.logger.info(
-        { chatJid, targetJid, replyText, messageId: result?.key?.id || "" },
+        { chatJid, targetJids, replyText, sent, isSelfChat },
         "sent WhatsApp reply",
       );
     } catch (error) {
