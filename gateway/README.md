@@ -24,6 +24,8 @@ Runtime layout:
 - `.soul/gateway/outbox`: outbound messages waiting to send
 - `.soul/gateway/sent`: sent outbound message records
 - `.soul/gateway/failed`: failed outbound message records
+- `.soul/gateway/logs/gateway.log`: persistent runtime logs
+- `.soul/gateway/logs/agent.log`: per-message Soul bridge logs with prompt, reply, meta, and captured debug output
 
 ## Install
 
@@ -44,6 +46,18 @@ Start the gateway:
 
 On first run, scan the QR code shown in the terminal.
 
+To watch persistent logs:
+
+```bash
+tail -f .soul/gateway/logs/gateway.log
+```
+
+To watch agent-side logs:
+
+```bash
+tail -f .soul/gateway/logs/agent.log
+```
+
 ## Queue an outbound message
 
 ```bash
@@ -58,6 +72,7 @@ Environment variables:
 
 - `SOUL_GATEWAY_ALLOWED_FROM`: comma-separated WhatsApp JIDs allowed to message the bot
 - `SOUL_GATEWAY_AUTO_REPLY`: `true` or `false`
+- `SOUL_GATEWAY_ALLOW_FROM_ME`: `true` or `false`; allow self-messages from the linked WhatsApp account for local testing
 - `SOUL_GATEWAY_ALLOW_GROUPS`: `true` or `false`
 - `SOUL_GATEWAY_OUTBOX_POLL_MS`: outbound polling interval
 - `SOUL_GATEWAY_PAIRING_PHONE`: optional phone number for pairing-code login without QR

@@ -61,10 +61,12 @@ export function loadConfig() {
     sentDir: path.join(gatewayHome, "sent"),
     failedDir: path.join(gatewayHome, "failed"),
     logsDir: path.join(gatewayHome, "logs"),
+    logFile: path.join(gatewayHome, "logs", "gateway.log"),
     pythonBin: process.env.SOUL_GATEWAY_PYTHON || path.join(rootDir, ".venv", "bin", "python3"),
     soulBridgeScript:
       process.env.SOUL_GATEWAY_BRIDGE_SCRIPT || path.join(rootDir, "scripts", "run_gateway_request.py"),
     allowGroups: parseBoolean(process.env.SOUL_GATEWAY_ALLOW_GROUPS, false),
+    allowFromMe: parseBoolean(process.env.SOUL_GATEWAY_ALLOW_FROM_ME, false),
     autoReply: parseBoolean(process.env.SOUL_GATEWAY_AUTO_REPLY, true),
     outboxPollMs: Number.parseInt(process.env.SOUL_GATEWAY_OUTBOX_POLL_MS || "5000", 10),
     markRead: parseBoolean(process.env.SOUL_GATEWAY_MARK_READ, true),

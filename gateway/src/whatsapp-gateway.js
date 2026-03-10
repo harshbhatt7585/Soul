@@ -16,7 +16,13 @@ import { SoulBridge } from "./soul-bridge.js";
 export class WhatsAppGateway {
   constructor(config) {
     this.config = config;
-    this.logger = P({ level: "info" });
+    this.logger = P(
+      { level: "info" },
+      P.multistream([
+        { stream: process.stdout },
+        { stream: P.destination({ dest: this.config.logFile, mkdir: true, sync: false }) },
+      ]),
+    );
     this.sock = null;
     this.outboxProcessor = new OutboxProcessor(config, this.logger);
     this.soulBridge = new SoulBridge(config, this.logger);
@@ -153,7 +159,7 @@ export class WhatsAppGateway {
     if (!this.config.allowGroups && isGroupJid(jid)) {
       return;
     }
-    if (message?.key?.fromMe) {
+    if (message?.key?.fromMe && !this.config.allowFromMe) {
       return;
     }
     if (this.config.allowedFrom.length > 0 && !this.config.allowedFrom.includes(jid)) {
@@ -165,12 +171,22 @@ export class WhatsAppGateway {
     if (!text) {
       return;
     }
+    const isFromMe = Boolean(message?.key?.fromMe);
 
     if (this.config.markRead && message?.key && this.sock) {
       await this.sock.readMessages([message.key]);
     }
 
-    this.logger.info({ jid, text }, "received inbound WhatsApp message");
+    const replyJids = this._getReplyJids(message, jid);
+    if (replyJids.length === 0) {
+      this.logger.warn({ jid }, "could not determine reply jid for inbound message");
+      return;
+    }
+
+    this.logger.info(
+      { jid, replyJids, text, fromMe: isFromMe },
+      "received inbound WhatsApp message",
+    );
 
     if (!this.config.autoReply || !this.sock) {
       return;
@@ -191,11 +207,34 @@ export class WhatsAppGateway {
         return;
       }
 
-      await this.sock.sendPresenceUpdate("composing", jid);
-      await this.sock.sendMessage(jid, { text: replyText });
-      this.logger.info({ jid }, "sent WhatsApp reply");
+      const sent = [];
+      for (const replyJid of replyJids) {
+        await this.sock.sendPresenceUpdate("composing", replyJid);
+        const result = await this.sock.sendMessage(replyJid, { text: replyText });
+        sent.push({
+          replyJid,
+          messageId: result?.key?.id || "",
+        });
+      }
+      this.logger.info({ jid, replyJids, replyText, sent }, "sent WhatsApp reply");
     } catch (error) {
       this.logger.error({ error, jid }, "failed to handle inbound WhatsApp message");
     }
+  }
+
+  _getReplyJids(message, inboundJid) {
+    if (!message?.key?.fromMe) {
+      return inboundJid ? [inboundJid] : [];
+    }
+    const ownId = this.sock?.user?.id || "";
+    const ownNumber = String(ownId).split(":")[0].replace(/\D+/g, "");
+    const targets = [];
+    if (ownNumber) {
+      targets.push(`${ownNumber}@s.whatsapp.net`);
+    }
+    if (inboundJid && !targets.includes(inboundJid)) {
+      targets.push(inboundJid);
+    }
+    return targets;
   }
 }

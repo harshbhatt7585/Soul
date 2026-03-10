@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from datetime import datetime, timezone
 import io
 import json
 from pathlib import Path
@@ -14,6 +15,16 @@ if str(SRC) not in sys.path:
 
 from soul.agent.agent import Agent
 from soul.config import load_agent_config
+
+
+AGENT_LOG = ROOT / ".soul" / "gateway" / "logs" / "agent.log"
+
+
+def _append_agent_log(entry: dict[str, object]) -> None:
+    AGENT_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with AGENT_LOG.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=True))
+        handle.write("\n")
 
 
 def main() -> int:
@@ -35,8 +46,38 @@ def main() -> int:
 
     config = load_agent_config(ROOT)
     agent = Agent(config=config)
-    with contextlib.redirect_stdout(io.StringIO()):
-        result = agent.run(text)
+    stdout_buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout_buffer):
+            result = agent.run(text)
+    except Exception as exc:  # pragma: no cover - bridge failure path
+        _append_agent_log(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "channel": payload.get("channel", ""),
+                "sender_jid": payload.get("sender_jid", ""),
+                "message_id": payload.get("message_id", ""),
+                "text": text,
+                "status": "error",
+                "error": repr(exc),
+                "debug_stdout": stdout_buffer.getvalue().strip(),
+            }
+        )
+        print(json.dumps({"error": f"agent run failed: {exc}"}), file=sys.stderr)
+        return 1
+
+    _append_agent_log(
+        {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "channel": payload.get("channel", ""),
+            "sender_jid": payload.get("sender_jid", ""),
+            "message_id": payload.get("message_id", ""),
+            "text": text,
+            "reply": result.reply,
+            "meta": result.meta,
+            "debug_stdout": stdout_buffer.getvalue().strip(),
+        }
+    )
 
     print(
         json.dumps(
