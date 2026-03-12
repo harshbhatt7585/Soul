@@ -14,7 +14,7 @@ import { OutboxProcessor } from "./outbox.js";
 import { ProcessedMessageStore } from "./processed-message-store.js";
 import { createWaSocket, formatError, getStatusCode } from "./session.js";
 
-function extractSelfTriggerPrompt(text) {
+function extractSoulTrigger(text) {
   const trimmed = typeof text === "string" ? text.trim() : "";
   if (!trimmed) {
     return "";
@@ -334,6 +334,7 @@ export class WhatsAppGateway {
     const isFromMe = Boolean(message?.key?.fromMe);
     const senderJid = normalizeSenderJid(message?.key?.participant ?? chatJid);
     const senderPhone = jidToPhone(isGroup ? senderJid : chatJid);
+    const soulTrigger = extractSoulTrigger(rawText);
     let text = rawText;
     let forceRespond = false;
 
@@ -342,12 +343,18 @@ export class WhatsAppGateway {
         this.logger.info({ chatJid, senderJid }, "ignored outbound message outside self-chat mode");
         return;
       }
-      text = extractSelfTriggerPrompt(rawText);
-      if (!text) {
+      if (!soulTrigger) {
         this.logger.info({ chatJid, text: rawText, fromMe: true }, "ignored self message without SOUL prefix");
         return;
       }
+      text = soulTrigger;
       forceRespond = true;
+    } else {
+      if (!soulTrigger) {
+        this.logger.info({ chatJid, text: rawText, fromMe: false }, "ignored inbound message without SOUL prefix");
+        return;
+      }
+      text = soulTrigger;
     }
 
     const messageTimestampMs = parseTimestampMs(message?.messageTimestamp);
